@@ -1,25 +1,26 @@
 {
   "expo": {
-    "name": "peace-and-learn",
+    "name": "Peace and Learn",
     "slug": "peace-and-learn",
-    "version": "1.0.0",
-    "orientation": "portrait",
-    "icon": "./assets/icon.png",
+    "version": "0.2.0",
+    "orientation": "default",
     "userInterfaceStyle": "light",
-    "ios": {
-      "supportsTablet": true
-    },
     "android": {
-      "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/android-icon-foreground.png",
-        "backgroundImage": "./assets/android-icon-background.png",
-        "monochromeImage": "./assets/android-icon-monochrome.png"
-      },
-      "predictiveBackGestureEnabled": false
+      "package": "com.peaceandlearn.app"
     },
-    "web": {
-      "favicon": "./assets/favicon.png"
-    }
+    "ios": {
+      "bundleIdentifier": "com.peaceandlearn.app"
+    },
+    "plugins": [
+      "expo-sqlite",
+      [
+        "llama.rn",
+        { "enableOpenCL": true, "forceCxx20": true }
+      ],
+      [
+        "expo-build-properties",
+        { "android": { "minSdkVersion": 26 } }
+      ]
+    ]
   }
 }

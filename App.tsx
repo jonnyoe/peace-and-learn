@@ -1,20 +1,59 @@
+import React, { useState } from 'react';
+import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
-import { StyleSheet, Text, View } from 'react-native';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
+import { initDb } from './src/db';
+import ReviewScreen from './src/screens/ReviewScreen';
+import ImportScreen from './src/screens/ImportScreen';
+import MapScreen from './src/screens/MapScreen';
+import ModelScreen from './src/screens/ModelScreen';
+import { color, font, size } from './src/theme';
+
+initDb();
+
+type Tab = 'review' | 'add' | 'map' | 'model';
+const TABS: { key: Tab; label: string }[] = [
+  { key: 'review', label: 'Review' },
+  { key: 'add', label: 'Add' },
+  { key: 'map', label: 'Map' },
+  { key: 'model', label: 'Model' },
+];
 
 export default function App() {
+  const [tab, setTab] = useState<Tab>('review');
+
   return (
-    <View style={styles.container}>
-      <Text>Open up App.tsx to start working on your app!</Text>
-      <StatusBar style="auto" />
-    </View>
+    <SafeAreaProvider>
+      <SafeAreaView style={st.root} edges={['top', 'bottom']}>
+        <StatusBar style="dark" />
+        {/* Screens remount on tab change, so Review always reflects new cards. */}
+        <View style={st.body}>
+          {tab === 'review' && <ReviewScreen onGoImport={() => setTab('add')} />}
+          {tab === 'add' && <ImportScreen onSaved={() => setTab('map')} />}
+          {tab === 'map' && <MapScreen />}
+          {tab === 'model' && <ModelScreen />}
+        </View>
+        <View style={st.tabs}>
+          {TABS.map(t => {
+            const active = tab === t.key;
+            return (
+              <Pressable key={t.key} onPress={() => setTab(t.key)} style={[st.tab, active && st.tabActive]} accessibilityRole="tab">
+                <Text style={[st.tabText, active && st.tabTextActive]}>{t.label}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      </SafeAreaView>
+    </SafeAreaProvider>
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#fff',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+const st = StyleSheet.create({
+  root: { flex: 1, backgroundColor: color.paper },
+  body: { flex: 1 },
+  tabs: { flexDirection: 'row', borderTopWidth: 2, borderColor: color.ink },
+  tab: { flex: 1, minHeight: size.tap + 8, alignItems: 'center', justifyContent: 'center' },
+  tabActive: { backgroundColor: color.ink },
+  tabText: { fontFamily: font.ui, fontSize: size.body, color: color.ink },
+  tabTextActive: { color: color.paper, fontWeight: '700' },
 });
