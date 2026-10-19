@@ -61,7 +61,32 @@ export function initDb() {
       rating INTEGER NOT NULL,
       reviewed_at INTEGER NOT NULL
     );
+    -- Imported documents (PDF, .txt, .md) split into pages.
+    CREATE TABLE IF NOT EXISTS sources (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      page_count INTEGER NOT NULL,
+      created_at INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS source_pages (
+      source_id TEXT NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
+      page INTEGER NOT NULL,
+      text TEXT NOT NULL,
+      done INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (source_id, page)
+    );
   `);
+  migrate();
+}
+
+// Migrations for installs created before a column existed. Each step checks
+// the current schema first, so it is safe to run on every launch.
+function migrate() {
+  const cols = db.getAllSync<{ name: string }>('PRAGMA table_info(concepts)').map(c => c.name);
+  if (!cols.includes('source_id')) {
+    db.execSync('ALTER TABLE concepts ADD COLUMN source_id TEXT REFERENCES sources(id) ON DELETE SET NULL');
+  }
 }
 
 // ---------- FSRS state (de)serialization ----------
@@ -90,7 +115,12 @@ export function getGraph(): { concepts: Concept[]; links: Link[]; cardCounts: Re
 
 // Saves an AI draft. Keys that match existing concept ids attach to the old
 // concept; anything else becomes a new concept. This is how the web grows.
-export function saveGenerated(g: Generated, domain: string, keepCard: (i: number) => boolean) {
+// When the draft came from an imported document, `source` tags new concepts
+// with it and marks the pages that were covered as done.
+export function saveGenerated(
+  g: Generated, domain: string, keepCard: (i: number) => boolean,
+  source?: { id: string; pages: number[] },
+) {
   const existing = new Set(db.getAllSync<{ id: string }>('SELECT id FROM concepts').map(r => r.id));
   const idFor: Record<string, string> = {};
   const now = Date.now();
@@ -102,8 +132,8 @@ export function saveGenerated(g: Generated, domain: string, keepCard: (i: number
       if (existing.has(c.key)) { idFor[c.key] = c.key; continue; }
       const id = newId();
       idFor[c.key] = id;
-      db.runSync('INSERT INTO concepts (id, title, summary, domain, created_at) VALUES (?, ?, ?, ?, ?)',
-        id, c.title, c.summary ?? '', domain, now);
+      db.runSync('INSERT INTO concepts (id, title, summary, domain, created_at, source_id) VALUES (?, ?, ?, ?, ?, ?)',
+        id, c.title, c.summary ?? '', domain, now, source?.id ?? null);
     }
     const resolve = (k: string) => idFor[k] ?? (existing.has(k) ? k : undefined);
 
@@ -121,7 +151,56 @@ export function saveGenerated(g: Generated, domain: string, keepCard: (i: number
       db.runSync('INSERT INTO cards (id, concept_id, front, back, fsrs, due) VALUES (?, ?, ?, ?, ?, ?)',
         newId(), conceptId, card.front, card.back, toJson(f), f.due.getTime());
     });
+
+    if (source) {
+      for (const p of source.pages) {
+        db.runSync('UPDATE source_pages SET done = 1 WHERE source_id = ? AND page = ?', source.id, p);
+      }
+    }
   });
+}
+
+// ---------- Imported sources ----------
+export type Source = {
+  id: string; title: string; kind: string; page_count: number; created_at: number; done_count: number;
+};
+export type SourcePage = { page: number; text: string; done: number };
+
+export function addSource(title: string, kind: string, pages: string[]): string {
+  const id = newId();
+  db.withTransactionSync(() => {
+    db.runSync('INSERT INTO sources (id, title, kind, page_count, created_at) VALUES (?, ?, ?, ?, ?)',
+      id, title, kind, pages.length, Date.now());
+    pages.forEach((text, i) =>
+      db.runSync('INSERT INTO source_pages (source_id, page, text) VALUES (?, ?, ?)', id, i + 1, text));
+  });
+  return id;
+}
+
+export function getSources(): Source[] {
+  return db.getAllSync<Source>(`
+    SELECT s.*, COALESCE(SUM(p.done), 0) AS done_count
+    FROM sources s LEFT JOIN source_pages p ON p.source_id = s.id
+    GROUP BY s.id ORDER BY s.created_at DESC`);
+}
+
+export function getSource(id: string): Source | null {
+  return getSources().find(s => s.id === id) ?? null;
+}
+
+export function getSourcePages(id: string, start: number, end: number): SourcePage[] {
+  return db.getAllSync<SourcePage>(
+    'SELECT page, text, done FROM source_pages WHERE source_id = ? AND page BETWEEN ? AND ? ORDER BY page',
+    id, start, end);
+}
+
+// The next `count` pages starting at the first unfinished one.
+export function nextUnfinishedRange(id: string, count = 5): { start: number; end: number; allDone: boolean } {
+  const total = db.getFirstSync<{ n: number }>('SELECT page_count AS n FROM sources WHERE id = ?', id)?.n ?? 0;
+  const first = db.getFirstSync<{ page: number }>(
+    'SELECT page FROM source_pages WHERE source_id = ? AND done = 0 ORDER BY page LIMIT 1', id)?.page;
+  if (first === undefined) return { start: 1, end: Math.max(1, Math.min(count, total)), allDone: true };
+  return { start: first, end: Math.min(first + count - 1, total), allDone: false };
 }
 
 // ---------- Reviewing ----------

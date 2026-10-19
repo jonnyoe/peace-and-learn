@@ -1,36 +1,127 @@
 import React, { useState } from 'react';
 import { View, Text, TextInput, ScrollView, Pressable, StyleSheet } from 'react-native';
-import { cancel, generate, getEngine } from '../ai';
-import { Generated, getConceptIndex, saveGenerated } from '../db';
+import { cancel, Draft, generate, getEngine } from '../ai';
+import {
+  addSource, getConceptIndex, getSource, getSourcePages, getSources, nextUnfinishedRange, saveGenerated,
+} from '../db';
+import { looksScanned, pickFile, readBase64, readTextPages } from '../import/files';
+import { estimate, pagesCovered, planParts, rangeLabel } from '../import/plan';
+import PdfExtractor from '../import/PdfExtractor';
 import { Button, s } from '../ui';
 import { color, font, size } from '../theme';
+
+type PdfJob = { base64: string; title: string };
+type DraftSource = { id: string; pages: number[]; label: string };
 
 export default function ImportScreen({ onSaved }: { onSaved: () => void }) {
   const [text, setText] = useState('');
   const [domain, setDomain] = useState('');
-  const [draft, setDraft] = useState<Generated | null>(null);
+  const [draft, setDraft] = useState<Draft | null>(null);
+  const [draftSource, setDraftSource] = useState<DraftSource | null>(null);
   const [rejected, setRejected] = useState<Set<number>>(new Set());
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState('');
   const [error, setError] = useState('');
 
+  // File import
+  const [pdf, setPdf] = useState<PdfJob | null>(null);
+  const [reading, setReading] = useState('');
+  const [sources, setSources] = useState(getSources);
+  const [sourceId, setSourceId] = useState<string | null>(null);
+  const [range, setRange] = useState({ start: 1, end: 1 });
+
   const existing = getConceptIndex();
   const existingTitle = (key: string) => existing.find(c => c.id === key)?.title;
   const titleFor = (key: string) =>
     draft?.concepts.find(c => c.key === key)?.title ?? existingTitle(key) ?? key;
+  const subject = domain.trim().toLowerCase();
 
+  const failMessage = (e: any) => getEngine() === 'cloud'
+    ? `Couldn't reach the server. ${e.message}`
+    : `Couldn't generate cards. ${e.message}`;
+
+  // ---------- Pasted text ----------
   async function run() {
     setBusy(true); setError(''); setStatus('Starting…');
     try {
-      const g = await generate(text.trim(), domain.trim().toLowerCase(), existing, setStatus);
-      setDraft(g); setRejected(new Set());
+      const g = await generate(text.trim(), subject, existing, setStatus);
+      setDraft(g); setDraftSource(null); setRejected(new Set());
     } catch (e: any) {
-      setError(getEngine() === 'cloud'
-        ? `Couldn't reach the server. ${e.message}`
-        : `Couldn't generate cards. ${e.message}`);
+      setError(failMessage(e));
     } finally { setBusy(false); setStatus(''); }
   }
 
+  // ---------- File import ----------
+  function openSource(id: string) {
+    const r = nextUnfinishedRange(id, 5);
+    setRange({ start: r.start, end: r.end });
+    setSourceId(id); setError('');
+  }
+
+  function finishImport(title: string, kind: string, pages: string[]) {
+    const id = addSource(title, kind, pages);
+    setSources(getSources());
+    openSource(id);
+  }
+
+  async function importFile() {
+    setError('');
+    try {
+      const f = await pickFile();
+      if (!f) return;
+      if (f.kind === 'pdf') {
+        setReading('Opening PDF…');
+        setPdf({ base64: await readBase64(f.uri), title: f.title });
+      } else {
+        setReading('Reading file…');
+        const pages = await readTextPages(f.uri);
+        setReading('');
+        if (!pages.length) { setError('That file is empty.'); return; }
+        finishImport(f.title, f.kind, pages);
+      }
+    } catch (e: any) {
+      setReading(''); setPdf(null);
+      setError(`Couldn't import the file. ${e.message}`);
+    }
+  }
+
+  function pdfDone(pages: string[], pageCount: number) {
+    const job = pdf;
+    setPdf(null); setReading('');
+    if (!job) return;
+    if (!pageCount) { setError('That PDF has no pages.'); return; }
+    if (looksScanned(pages)) {
+      setError('This looks like a scanned PDF: almost no text could be read from it. Scanned PDFs aren\'t supported yet.');
+      return;
+    }
+    finishImport(job.title, 'pdf', pages);
+  }
+
+  function pdfError(message: string) {
+    setPdf(null); setReading('');
+    setError(message);
+  }
+
+  async function runSource() {
+    if (!sourceId) return;
+    const pages = getSourcePages(sourceId, range.start, range.end);
+    const parts = planParts(pages);
+    if (!parts.length) { setError('Those pages have no text. Pick other pages.'); return; }
+    const label = rangeLabel(range.start, range.end);
+    setBusy(true); setError(''); setStatus(`${label}: starting…`);
+    try {
+      const g = await generate(parts.map(p => p.text), subject, existing, setStatus, label);
+      const covered = pagesCovered(pages, parts, g.partsCompleted);
+      const coveredLabel = covered.length
+        ? rangeLabel(covered[0], covered[covered.length - 1]) : 'No pages';
+      setDraft(g); setRejected(new Set());
+      setDraftSource({ id: sourceId, pages: covered, label: coveredLabel });
+    } catch (e: any) {
+      setError(failMessage(e));
+    } finally { setBusy(false); setStatus(''); }
+  }
+
+  // ---------- Draft ----------
   function toggle(i: number) {
     const next = new Set(rejected);
     next.has(i) ? next.delete(i) : next.add(i);
@@ -39,10 +130,31 @@ export default function ImportScreen({ onSaved }: { onSaved: () => void }) {
 
   function save() {
     if (!draft) return;
-    saveGenerated(draft, domain.trim().toLowerCase(), i => !rejected.has(i));
-    setDraft(null); setText('');
+    saveGenerated(draft, subject, i => !rejected.has(i),
+      draftSource ? { id: draftSource.id, pages: draftSource.pages } : undefined);
+    setDraft(null); setDraftSource(null); setSourceId(null);
+    if (!draftSource) setText('');
+    setSources(getSources());
     onSaved();
   }
+
+  const busyRow = (
+    <View style={st.busy}>
+      <Text style={[s.body, { flex: 1 }]}>{status}</Text>
+      {getEngine() === 'local' && <Button label="Stop" onPress={cancel} />}
+    </View>
+  );
+  const errorBox = !!error && <Text style={[s.body, st.error]}>{error}</Text>;
+  const subjectInput = (
+    <TextInput
+      style={s.input}
+      placeholder="Subject, e.g. philosophy"
+      placeholderTextColor={color.faint}
+      value={domain}
+      onChangeText={setDomain}
+      autoCapitalize="none"
+    />
+  );
 
   if (draft) {
     const kept = draft.cards.length - rejected.size;
@@ -51,6 +163,20 @@ export default function ImportScreen({ onSaved }: { onSaved: () => void }) {
       <ScrollView contentContainerStyle={st.wrap}>
         <Text style={s.h1}>Review the draft</Text>
         <Text style={s.meta}>Tap a card to leave it out. Only kept cards go into your deck.</Text>
+
+        {draft.stopped && (
+          <View style={st.box}>
+            <Text style={st.boxTitle}>Stopped early</Text>
+            <Text style={s.body}>
+              These are the cards from {draft.partsCompleted} of {draft.partsTotal} parts.
+              {draftSource
+                ? draftSource.pages.length
+                  ? ` Saving marks ${draftSource.label.toLowerCase()} as done.`
+                  : ' No page was finished, so none will be marked done.'
+                : ''}
+            </Text>
+          </View>
+        )}
 
         {links.length > 0 && (
           <View style={st.box}>
@@ -75,26 +201,109 @@ export default function ImportScreen({ onSaved }: { onSaved: () => void }) {
         })}
 
         <View style={st.row}>
-          <Button label="Discard draft" onPress={() => setDraft(null)} />
+          <Button label="Discard draft" onPress={() => { setDraft(null); setDraftSource(null); }} />
           <Button label={`Add ${kept} card${kept === 1 ? '' : 's'}`} filled disabled={!kept} onPress={save} style={{ flex: 1 }} />
         </View>
       </ScrollView>
     );
   }
 
+  const source = sourceId ? getSource(sourceId) : null;
+  if (source) {
+    const total = source.page_count;
+    const pages = getSourcePages(source.id, range.start, range.end);
+    const parts = planParts(pages);
+    const chars = parts.reduce((n, p) => n + p.text.length, 0);
+    const set = (start: number, end: number) => {
+      start = Math.max(1, Math.min(start, total));
+      end = Math.max(start, Math.min(end, total));
+      setRange({ start, end });
+    };
+    const label = rangeLabel(range.start, range.end);
+    return (
+      <ScrollView contentContainerStyle={st.wrap} keyboardShouldPersistTaps="handled">
+        <Text style={s.h1}>{source.title}</Text>
+        <Text style={s.meta}>
+          {source.kind.toUpperCase()} · {total} page{total === 1 ? '' : 's'} · {source.done_count} done
+        </Text>
+
+        {subjectInput}
+
+        <Stepper label="From page" value={range.start} disabled={busy}
+          onMinus={() => set(range.start - 1, range.end)}
+          onPlus={() => set(range.start + 1, Math.max(range.end, range.start + 1))} />
+        <Stepper label="To page" value={range.end} disabled={busy}
+          onMinus={() => set(Math.min(range.start, range.end - 1), range.end - 1)}
+          onPlus={() => set(range.start, range.end + 1)} />
+
+        <Text style={s.body}>
+          {parts.length
+            ? `${label}: ${chars.toLocaleString()} characters in ${parts.length} part${parts.length === 1 ? '' : 's'}, ${estimate(parts.length, getEngine())}.`
+            : `${label} have no text.`}
+        </Text>
+        {pages.some(p => p.done) && (
+          <Text style={s.meta}>Some of these pages are already done. Generating again adds new cards.</Text>
+        )}
+
+        {errorBox}
+        {busy ? busyRow : (
+          <View style={st.row}>
+            <Button label="Back" onPress={() => { setSourceId(null); setError(''); setSources(getSources()); }} />
+            <Button label={`Generate from ${label.toLowerCase()}`} filled style={{ flex: 1 }}
+              disabled={!parts.length || !subject} onPress={runSource} />
+          </View>
+        )}
+      </ScrollView>
+    );
+  }
+
   return (
     <ScrollView contentContainerStyle={st.wrap} keyboardShouldPersistTaps="handled">
-      <Text style={s.h1}>Add material</Text>
-      <Text style={s.meta}>Paste notes, a passage, or an article. New ideas get linked to concepts already in your deck.</Text>
+      {pdf && (
+        <PdfExtractor
+          base64={pdf.base64}
+          onProgress={(p, n) => setReading(`Reading PDF… page ${p} of ${n}`)}
+          onDone={pdfDone}
+          onError={pdfError}
+        />
+      )}
 
-      <TextInput
-        style={s.input}
-        placeholder="Subject, e.g. philosophy"
-        placeholderTextColor={color.faint}
-        value={domain}
-        onChangeText={setDomain}
-        autoCapitalize="none"
-      />
+      <Text style={s.h1}>Add material</Text>
+      <Text style={s.meta}>Import a document or paste text. New ideas get linked to concepts already in your deck.</Text>
+
+      {subjectInput}
+
+      {reading ? (
+        <View style={st.busy}>
+          <Text style={[s.body, { flex: 1 }]}>{reading}</Text>
+          {pdf && <Button label="Cancel" onPress={() => { setPdf(null); setReading(''); }} />}
+        </View>
+      ) : (
+        <Button label="Import file" onPress={importFile} disabled={busy} />
+      )}
+      <Text style={s.meta}>PDF, .txt or .md. PDFs need an internet connection to read.</Text>
+
+      {sources.length > 0 && (
+        <View style={st.sources}>
+          <Text style={st.boxTitle}>Sources</Text>
+          {sources.map(src => {
+            const done = src.done_count >= src.page_count;
+            return (
+              <View key={src.id} style={st.sourceRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={s.body} numberOfLines={2}>{src.title}</Text>
+                  <Text style={s.meta}>
+                    {done ? 'All ' : `${src.done_count} of `}{src.page_count} page{src.page_count === 1 ? '' : 's'} done
+                  </Text>
+                </View>
+                <Button label={done ? 'Open' : 'Continue'} disabled={busy || !!reading} onPress={() => openSource(src.id)} />
+              </View>
+            );
+          })}
+        </View>
+      )}
+
+      <Text style={[st.boxTitle, { marginTop: 8 }]}>Or paste text</Text>
       <TextInput
         style={[s.input, st.textArea]}
         placeholder="Paste text here"
@@ -104,22 +313,31 @@ export default function ImportScreen({ onSaved }: { onSaved: () => void }) {
         multiline
         textAlignVertical="top"
       />
-      {!!error && <Text style={[s.body, st.error]}>{error}</Text>}
-      {busy ? (
-        <View style={st.busy}>
-          <Text style={[s.body, { flex: 1 }]}>{status}</Text>
-          {getEngine() === 'local' && <Button label="Stop" onPress={cancel} />}
-        </View>
-      ) : (
-        <Button label="Generate cards" filled disabled={!text.trim() || !domain.trim()} onPress={run} />
+      {errorBox}
+      {busy ? busyRow : (
+        <Button label="Generate cards" filled disabled={!text.trim() || !subject} onPress={run} />
       )}
     </ScrollView>
   );
 }
 
+// Large −/+ buttons instead of a slider: easier to hit and nothing animates.
+function Stepper({ label, value, onMinus, onPlus, disabled }: {
+  label: string; value: number; onMinus: () => void; onPlus: () => void; disabled?: boolean;
+}) {
+  return (
+    <View style={st.stepper}>
+      <Text style={[s.body, { flex: 1 }]}>{label}</Text>
+      <Button label="−" onPress={onMinus} disabled={disabled} style={st.stepBtn} />
+      <Text style={st.stepValue}>{value}</Text>
+      <Button label="+" onPress={onPlus} disabled={disabled} style={st.stepBtn} />
+    </View>
+  );
+}
+
 const st = StyleSheet.create({
   wrap: { padding: size.pad, gap: 14 },
-  textArea: { minHeight: 260 },
+  textArea: { minHeight: 220 },
   busy: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: size.tap },
   error: { borderLeftWidth: 4, borderColor: color.ink, paddingLeft: 12 },
   box: { borderWidth: 2, borderColor: color.ink, borderRadius: 6, padding: 14, gap: 6 },
@@ -129,4 +347,14 @@ const st = StyleSheet.create({
   front: { fontFamily: font.reading, fontSize: 21, lineHeight: 30, color: color.ink, fontWeight: '600' },
   struck: { textDecorationLine: 'line-through', color: color.faint },
   row: { flexDirection: 'row', gap: 12, marginTop: 8 },
+  sources: { borderTopWidth: 2, borderColor: color.ink, paddingTop: 12, gap: 4 },
+  sourceRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    borderBottomWidth: 1, borderColor: color.ink, paddingVertical: 10, minHeight: size.tap + 16,
+  },
+  stepper: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  stepBtn: { minWidth: size.tap, paddingHorizontal: 0 },
+  stepValue: {
+    fontFamily: font.reading, fontSize: 24, color: color.ink, minWidth: 56, textAlign: 'center',
+  },
 });
