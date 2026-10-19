@@ -212,6 +212,32 @@ export function getDueCards(now = new Date()): StudyCard[] {
   return rows.map(r => ({ ...r, fsrs: fromJson(r.fsrs) }));
 }
 
+// Every card regardless of due date, for practice sessions.
+export function getAllCards(): StudyCard[] {
+  const rows = db.getAllSync<any>(`
+    SELECT cards.*, concepts.domain AS domain, concepts.title AS concept_title
+    FROM cards JOIN concepts ON concepts.id = cards.concept_id`);
+  return rows.map(r => ({ ...r, fsrs: fromJson(r.fsrs) }));
+}
+
+export function countCards(): number {
+  return db.getFirstSync<{ n: number }>('SELECT COUNT(*) AS n FROM cards')?.n ?? 0;
+}
+
+/**
+ * Makes every card new again and due now, and clears review history.
+ * Cards, concepts, links, domains and sources are kept. Returns the card count.
+ */
+export function resetAllProgress(now = new Date()): number {
+  const empty = toJson(createEmptyCard(now));
+  let n = 0;
+  db.withTransactionSync(() => {
+    n = db.runSync('UPDATE cards SET fsrs = ?, due = ?', empty, now.getTime()).changes;
+    db.runSync('DELETE FROM reviews');
+  });
+  return n;
+}
+
 export function saveReview(cardId: string, next: FsrsCard, rating: number) {
   db.withTransactionSync(() => {
     db.runSync('UPDATE cards SET fsrs = ?, due = ? WHERE id = ?', toJson(next), next.due.getTime(), cardId);

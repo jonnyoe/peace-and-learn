@@ -8,6 +8,23 @@ export function rate(card: StudyCard, grade: Grade) {
   return scheduler.next(card.fsrs, new Date(), grade).card;
 }
 
+function shuffle<T>(a: T[]): T[] {
+  const b = [...a];
+  for (let i = b.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [b[i], b[j]] = [b[j], b[i]];
+  }
+  return b;
+}
+
+/**
+ * A practice session from every card, not just due ones. Shuffling first
+ * shuffles each domain's cards; buildSession then interleaves by weight.
+ */
+export function buildPracticeSession(all: StudyCard[], domains: Domain[], limit = 40): StudyCard[] {
+  return buildSession(shuffle(all), domains, limit);
+}
+
 /**
  * Builds today's session from due cards, interleaved across domains.
  * Each slot goes to the domain furthest below its target share, so a

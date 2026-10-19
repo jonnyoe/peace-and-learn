@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, ScrollView, Pressable, StyleSheet } from 'react-native';
-import { setSetting } from '../db';
+import { View, Text, ScrollView, Pressable, StyleSheet, Alert } from 'react-native';
+import { resetAllProgress, setSetting } from '../db';
 import { getEngine, getModelId, Engine } from '../ai';
 import { MODELS, ModelInfo } from '../ai/models';
 import { cancelDownload, deleteModel, downloadModel, isDownloaded, unload } from '../ai/local';
@@ -13,6 +13,25 @@ export default function ModelScreen() {
   const [have, setHave] = useState<Record<string, boolean>>({});
   const [progress, setProgress] = useState<{ id: string; pct: number } | null>(null);
   const [error, setError] = useState('');
+  const [resetNote, setResetNote] = useState('');
+
+  function confirmReset() {
+    setResetNote('');
+    Alert.alert(
+      'Reset all progress?',
+      'Every card becomes new and due now, and your review history is deleted. This can\'t be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Reset', style: 'destructive',
+          onPress: () => {
+            const n = resetAllProgress();
+            setResetNote(`Progress reset. ${n} card${n === 1 ? ' is' : 's are'} due now.`);
+          },
+        },
+      ],
+    );
+  }
 
   async function refresh() {
     const entries = await Promise.all(MODELS.map(async m => [m.id, await isDownloaded(m)] as const));
@@ -110,6 +129,16 @@ export default function ModelScreen() {
           })}
         </>
       )}
+
+      <View style={st.reset}>
+        <Text style={s.h1}>Reset all progress</Text>
+        <Text style={s.body}>
+          Makes every card new and due today, and deletes your review history.
+          Your cards, concepts, links and subjects stay.
+        </Text>
+        {!!resetNote && <Text style={[s.body, st.error]}>{resetNote}</Text>}
+        <Button label="Reset all progress" onPress={confirmReset} />
+      </View>
     </ScrollView>
   );
 }
@@ -126,4 +155,5 @@ const st = StyleSheet.create({
   modelHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' },
   modelName: { fontFamily: font.reading, fontSize: 21, color: color.ink, fontWeight: '600' },
   actions: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 6 },
+  reset: { borderTopWidth: 2, borderColor: color.ink, marginTop: 32, paddingTop: 20, gap: 12 },
 });
