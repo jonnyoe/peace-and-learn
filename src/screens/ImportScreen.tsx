@@ -1,5 +1,7 @@
-import React, { useState } from 'react';
-import { View, Text, TextInput, ScrollView, Pressable, StyleSheet } from 'react-native';
+import React, { useRef, useState } from 'react';
+import {
+  View, Text, TextInput, ScrollView, Pressable, StyleSheet, KeyboardAvoidingView, Keyboard, Platform,
+} from 'react-native';
 import { cancel, Draft, generate, getEngine } from '../ai';
 import {
   addSource, getConceptIndex, getSource, getSourcePages, getSources, nextUnfinishedRange, saveGenerated,
@@ -11,6 +13,25 @@ import { Button, s } from '../ui';
 import { color, font, size } from '../theme';
 
 type PdfJob = { base64: string; title: string };
+
+// Keeps content above the iPhone keyboard. Dragging the list down closes the
+// keyboard, and tapping anywhere that isn't a control or text box closes it too.
+// The tap catcher has no pressed style, so nothing flashes on e-ink.
+function KeyboardScreen({ children }: { children: React.ReactNode }) {
+  return (
+    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <ScrollView
+        contentContainerStyle={{ flexGrow: 1 }}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="interactive"
+      >
+        <Pressable onPress={Keyboard.dismiss} accessible={false} style={st.wrap}>
+          {children}
+        </Pressable>
+      </ScrollView>
+    </KeyboardAvoidingView>
+  );
+}
 type DraftSource = { id: string; pages: number[]; label: string };
 
 export default function ImportScreen({ onSaved }: { onSaved: () => void }) {
@@ -22,6 +43,7 @@ export default function ImportScreen({ onSaved }: { onSaved: () => void }) {
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState('');
   const [error, setError] = useState('');
+  const textBox = useRef<React.ComponentRef<typeof TextInput>>(null);
 
   // File import
   const [pdf, setPdf] = useState<PdfJob | null>(null);
@@ -145,7 +167,8 @@ export default function ImportScreen({ onSaved }: { onSaved: () => void }) {
     </View>
   );
   const errorBox = !!error && <Text style={[s.body, st.error]}>{error}</Text>;
-  const subjectInput = (
+  // On the main screen Return jumps to the paste box; elsewhere it closes the keyboard.
+  const subjectInput = (next: boolean) => (
     <TextInput
       style={s.input}
       placeholder="Subject, e.g. philosophy"
@@ -153,6 +176,9 @@ export default function ImportScreen({ onSaved }: { onSaved: () => void }) {
       value={domain}
       onChangeText={setDomain}
       autoCapitalize="none"
+      returnKeyType={next ? 'next' : 'done'}
+      submitBehavior={next ? 'submit' : 'blurAndSubmit'}
+      onSubmitEditing={() => (next ? textBox.current?.focus() : Keyboard.dismiss())}
     />
   );
 
@@ -160,7 +186,7 @@ export default function ImportScreen({ onSaved }: { onSaved: () => void }) {
     const kept = draft.cards.length - rejected.size;
     const links = draft.links.filter(l => existingTitle(l.from) || existingTitle(l.to));
     return (
-      <ScrollView contentContainerStyle={st.wrap}>
+      <ScrollView contentContainerStyle={st.wrap} keyboardDismissMode="interactive">
         <Text style={s.h1}>Review the draft</Text>
         <Text style={s.meta}>Tap a card to leave it out. Only kept cards go into your deck.</Text>
 
@@ -221,13 +247,13 @@ export default function ImportScreen({ onSaved }: { onSaved: () => void }) {
     };
     const label = rangeLabel(range.start, range.end);
     return (
-      <ScrollView contentContainerStyle={st.wrap} keyboardShouldPersistTaps="handled">
+      <KeyboardScreen>
         <Text style={s.h1}>{source.title}</Text>
         <Text style={s.meta}>
           {source.kind.toUpperCase()} · {total} page{total === 1 ? '' : 's'} · {source.done_count} done
         </Text>
 
-        {subjectInput}
+        {subjectInput(false)}
 
         <Stepper label="From page" value={range.start} disabled={busy}
           onMinus={() => set(range.start - 1, range.end)}
@@ -250,15 +276,15 @@ export default function ImportScreen({ onSaved }: { onSaved: () => void }) {
           <View style={st.row}>
             <Button label="Back" onPress={() => { setSourceId(null); setError(''); setSources(getSources()); }} />
             <Button label={`Generate from ${label.toLowerCase()}`} filled style={{ flex: 1 }}
-              disabled={!parts.length || !subject} onPress={runSource} />
+              disabled={!parts.length || !subject} onPress={() => { Keyboard.dismiss(); runSource(); }} />
           </View>
         )}
-      </ScrollView>
+      </KeyboardScreen>
     );
   }
 
   return (
-    <ScrollView contentContainerStyle={st.wrap} keyboardShouldPersistTaps="handled">
+    <KeyboardScreen>
       {pdf && (
         <PdfExtractor
           base64={pdf.base64}
@@ -271,7 +297,7 @@ export default function ImportScreen({ onSaved }: { onSaved: () => void }) {
       <Text style={s.h1}>Add material</Text>
       <Text style={s.meta}>Import a document or paste text. New ideas get linked to concepts already in your deck.</Text>
 
-      {subjectInput}
+      {subjectInput(true)}
 
       {reading ? (
         <View style={st.busy}>
@@ -304,7 +330,14 @@ export default function ImportScreen({ onSaved }: { onSaved: () => void }) {
       )}
 
       <Text style={[st.boxTitle, { marginTop: 8 }]}>Or paste text</Text>
+      {/* Above the text box so it stays reachable while the keyboard is open. */}
+      {busy ? busyRow : (
+        <Button label="Generate cards" filled disabled={!text.trim() || !subject}
+          onPress={() => { Keyboard.dismiss(); run(); }} />
+      )}
+      {errorBox}
       <TextInput
+        ref={textBox}
         style={[s.input, st.textArea]}
         placeholder="Paste text here"
         placeholderTextColor={color.faint}
@@ -313,11 +346,7 @@ export default function ImportScreen({ onSaved }: { onSaved: () => void }) {
         multiline
         textAlignVertical="top"
       />
-      {errorBox}
-      {busy ? busyRow : (
-        <Button label="Generate cards" filled disabled={!text.trim() || !subject} onPress={run} />
-      )}
-    </ScrollView>
+    </KeyboardScreen>
   );
 }
 
