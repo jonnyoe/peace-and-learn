@@ -36,7 +36,7 @@ export const s = StyleSheet.create({
     justifyContent: 'center',
   },
   disabled: { borderColor: color.faint },
-  label: { fontFamily: font.ui, fontSize: size.body, fontWeight: '600' },
+  label: { fontFamily: font.uiSemi, fontSize: size.body },
   h1: { fontFamily: font.reading, fontSize: 30, color: color.ink, marginBottom: 6 },
   body: { fontFamily: font.reading, fontSize: size.body, color: color.ink, lineHeight: 27 },
   meta: { fontFamily: font.ui, fontSize: size.small, color: color.faint },
@@ -48,6 +48,6 @@ export const s = StyleSheet.create({
     fontFamily: font.reading,
     fontSize: size.body,
     color: color.ink,
-    backgroundColor: color.paper,
+    backgroundColor: color.panel,
   },
 });

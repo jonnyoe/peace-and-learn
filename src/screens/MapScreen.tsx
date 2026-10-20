@@ -104,7 +104,7 @@ const st = StyleSheet.create({
   pct: { width: 56, textAlign: 'right' },
   step: { width: size.tap, paddingHorizontal: 0 },
   section: { marginTop: 14 },
-  sectionTitle: { fontFamily: font.ui, fontSize: size.small, fontWeight: '700', color: color.ink, borderBottomWidth: 2, borderColor: color.ink, paddingBottom: 6 },
+  sectionTitle: { fontFamily: font.uiBold, fontSize: size.small, color: color.ink, borderBottomWidth: 2, borderColor: color.ink, paddingBottom: 6 },
   concept: { borderBottomWidth: 1, borderColor: color.ink, paddingVertical: 14 },
   conceptHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', gap: 12 },
   conceptTitle: { fontFamily: font.reading, fontSize: 20, color: color.ink, flex: 1 },

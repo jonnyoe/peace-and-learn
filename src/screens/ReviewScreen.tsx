@@ -141,7 +141,7 @@ const st = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', gap: 12,
     borderWidth: 2, borderColor: color.ink, borderRadius: 6, paddingVertical: 6, paddingLeft: 12, paddingRight: 6,
   },
-  practiceLabel: { flex: 1, fontFamily: font.ui, fontSize: size.small, fontWeight: '700', color: color.ink },
+  practiceLabel: { flex: 1, fontFamily: font.uiBold, fontSize: size.small, color: color.ink },
   card: { flex: 1, justifyContent: 'center', paddingHorizontal: 8 },
   front: { fontFamily: font.reading, fontSize: size.card, lineHeight: 38, color: color.ink },
   back: { fontFamily: font.reading, fontSize: 22, lineHeight: 33, color: color.ink },

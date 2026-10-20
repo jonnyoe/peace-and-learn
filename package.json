@@ -3,6 +3,8 @@
   "version": "1.0.0",
   "main": "index.ts",
   "dependencies": {
+    "@expo-google-fonts/ibm-plex-sans": "^0.4.1",
+    "@expo-google-fonts/literata": "^0.4.3",
     "expo": "~58.0.14",
     "expo-build-properties": "~58.0.11",
     "expo-document-picker": "~58.0.4",
@@ -13,6 +15,7 @@
     "react": "19.3.0",
     "react-native": "0.88.0",
     "react-native-safe-area-context": "~5.10.1",
+    "react-native-svg": "15.16.0",
     "react-native-webview": "14.0.1",
     "ts-fsrs": "^5.4.2"
   },

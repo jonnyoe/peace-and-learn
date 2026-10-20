@@ -189,11 +189,11 @@ const st = StyleSheet.create({
   segItem: { flex: 1, minHeight: size.tap, alignItems: 'center', justifyContent: 'center' },
   segOn: { backgroundColor: color.ink },
   segText: { fontFamily: font.ui, fontSize: size.body, color: color.ink },
-  segTextOn: { color: color.paper, fontWeight: '700' },
+  segTextOn: { color: color.paper, fontFamily: font.uiBold },
   error: { borderLeftWidth: 4, borderColor: color.ink, paddingLeft: 12 },
   model: { borderBottomWidth: 1, borderColor: color.ink, paddingVertical: 16, gap: 6 },
   modelHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' },
-  modelName: { fontFamily: font.reading, fontSize: 21, color: color.ink, fontWeight: '600' },
+  modelName: { fontFamily: font.readingSemi, fontSize: 21, color: color.ink },
   actions: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 6 },
   reset: { borderTopWidth: 2, borderColor: color.ink, marginTop: 32, paddingTop: 20, gap: 12 },
 });
