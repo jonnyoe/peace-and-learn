@@ -535,3 +535,24 @@ export function removeSample(): number {
   });
   return n;
 }
+
+
+// ---------- Home ----------
+export type HomeGroup = { category: string | null; webs: { key: WebKey; title: string; bubbles: number }[] };
+
+/** Subjects grouped by category, A to Z; subjects without one come last. */
+export function getHome(): HomeGroup[] {
+  const counts: Record<string, number> = {};
+  db.getAllSync<{ domain: string; n: number }>('SELECT domain, COUNT(*) AS n FROM concepts GROUP BY domain')
+    .forEach(r => (counts[r.domain] = r.n));
+  const groups = new Map<string | null, HomeGroup>();
+  for (const w of listWebs()) {
+    const cat = w.category?.trim() || null;
+    if (!groups.has(cat)) groups.set(cat, { category: cat, webs: [] });
+    groups.get(cat)!.webs.push({ key: { domain: w.name, parentId: null }, title: w.title, bubbles: counts[w.name] ?? 0 });
+  }
+  const list = [...groups.values()];
+  list.forEach(g => g.webs.sort((a, b) => a.title.localeCompare(b.title)));
+  return list.sort((a, b) =>
+    a.category === null ? 1 : b.category === null ? -1 : a.category.localeCompare(b.category));
+}

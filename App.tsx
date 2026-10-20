@@ -2,25 +2,43 @@ import React, { useState } from 'react';
 import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
-import { initDb } from './src/db';
+import { getSetting, initDb, setSetting, WebKey } from './src/db';
+import HomeScreen from './src/screens/HomeScreen';
+import WebScreen from './src/screens/WebScreen';
 import ReviewScreen from './src/screens/ReviewScreen';
 import ImportScreen from './src/screens/ImportScreen';
 import MapScreen from './src/screens/MapScreen';
 import ModelScreen from './src/screens/ModelScreen';
-import { color, font, size } from './src/theme';
+import { color, font, size, useThemeFonts } from './src/theme';
 
 initDb();
 
-type Tab = 'review' | 'add' | 'map' | 'model';
+type Tab = 'web' | 'review' | 'add' | 'map' | 'model';
 const TABS: { key: Tab; label: string }[] = [
+  { key: 'web', label: 'Webs' },
   { key: 'review', label: 'Review' },
   { key: 'add', label: 'Add' },
   { key: 'map', label: 'Map' },
   { key: 'model', label: 'Model' },
 ];
 
+// Where the Webs tab is: null is the home screen (all subjects), otherwise
+// one web. Remembered between launches.
+function loadPlace(): WebKey | null {
+  try { return JSON.parse(getSetting('web_place') ?? 'null'); } catch { return null; }
+}
+
 export default function App() {
-  const [tab, setTab] = useState<Tab>('review');
+  const fontsReady = useThemeFonts();
+  const [tab, setTab] = useState<Tab>('web');
+  const [place, setPlaceState] = useState<WebKey | null>(loadPlace);
+
+  function setPlace(p: WebKey | null) {
+    setSetting('web_place', JSON.stringify(p));
+    setPlaceState(p);
+  }
+
+  if (!fontsReady) return <View style={st.root} />;
 
   return (
     <SafeAreaProvider>
@@ -28,6 +46,9 @@ export default function App() {
         <StatusBar style="dark" />
         {/* Screens remount on tab change, so Review always reflects new cards. */}
         <View style={st.body}>
+          {tab === 'web' && (place
+            ? <WebScreen webKey={place} onOpen={setPlace} onHome={() => setPlace(null)} />
+            : <HomeScreen onOpen={setPlace} />)}
           {tab === 'review' && <ReviewScreen onGoImport={() => setTab('add')} />}
           {tab === 'add' && <ImportScreen onSaved={() => setTab('map')} />}
           {tab === 'map' && <MapScreen />}
@@ -54,6 +75,6 @@ const st = StyleSheet.create({
   tabs: { flexDirection: 'row', borderTopWidth: 2, borderColor: color.ink },
   tab: { flex: 1, minHeight: size.tap + 8, alignItems: 'center', justifyContent: 'center' },
   tabActive: { backgroundColor: color.ink },
-  tabText: { fontFamily: font.ui, fontSize: size.body, color: color.ink },
-  tabTextActive: { color: color.paper, fontWeight: '700' },
+  tabText: { fontFamily: font.ui, fontSize: 16, color: color.ink },
+  tabTextActive: { color: color.paper, fontFamily: font.uiBold },
 });
