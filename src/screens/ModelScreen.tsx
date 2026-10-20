@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, ScrollView, Pressable, StyleSheet, Alert } from 'react-native';
-import { resetAllProgress, setSetting } from '../db';
+import { addSample, hasSample, removeSample, resetAllProgress, setSetting } from '../db';
 import { getEngine, getModelId, Engine } from '../ai';
 import { MODELS, ModelInfo } from '../ai/models';
 import { cancelDownload, deleteModel, downloadModel, isDownloaded, unload } from '../ai/local';
@@ -14,6 +14,33 @@ export default function ModelScreen() {
   const [progress, setProgress] = useState<{ id: string; pct: number } | null>(null);
   const [error, setError] = useState('');
   const [resetNote, setResetNote] = useState('');
+  const [sample, setSample] = useState(hasSample);
+  const [sampleNote, setSampleNote] = useState('');
+
+  function confirmRemoveSample() {
+    setSampleNote('');
+    Alert.alert(
+      'Remove the Memory sample?',
+      'Deletes the sample bubbles, their cards, review history and to-dos. Anything you added yourself stays.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove', style: 'destructive',
+          onPress: () => {
+            const n = removeSample();
+            setSample(false);
+            setSampleNote(`Sample removed (${n} bubble${n === 1 ? '' : 's'}).`);
+          },
+        },
+      ],
+    );
+  }
+
+  function putSampleBack() {
+    addSample();
+    setSample(true);
+    setSampleNote('Sample added. It shows up as the "memory" subject.');
+  }
 
   function confirmReset() {
     setResetNote('');
@@ -129,6 +156,19 @@ export default function ModelScreen() {
           })}
         </>
       )}
+
+      <View style={st.reset}>
+        <Text style={s.h1}>Sample subject</Text>
+        <Text style={s.body}>
+          {sample
+            ? 'The "Memory" sample shows how a knowledge web looks: nested webs, cards with some review history, and to-dos.'
+            : 'Add the "Memory" sample to see how a knowledge web looks. You can remove it again here.'}
+        </Text>
+        {!!sampleNote && <Text style={[s.body, st.error]}>{sampleNote}</Text>}
+        {sample
+          ? <Button label="Remove sample" onPress={confirmRemoveSample} />
+          : <Button label="Add sample" onPress={putSampleBack} />}
+      </View>
 
       <View style={st.reset}>
         <Text style={s.h1}>Reset all progress</Text>
