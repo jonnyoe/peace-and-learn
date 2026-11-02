@@ -84,6 +84,18 @@ export function wrap(text: string, maxChars: number): string[] {
   return lines;
 }
 
+/** Every way to break words into 1 to maxLines lines, fewest lines first. */
+function splits(words: string[], maxLines: number): string[][] {
+  const out: string[][] = [];
+  const go = (from: number, acc: string[], left: number) => {
+    if (from === words.length) { out.push(acc); return; }
+    if (left === 0) return;
+    for (let k = from + 1; k <= words.length; k++) go(k, [...acc, words.slice(from, k).join(' ')], left - 1);
+  };
+  if (words.length) go(0, [], maxLines);
+  return out.sort((a, b) => a.length - b.length);
+}
+
 // Characters per line for a font size inside a circle of radius r.
 // Literata averages about 0.58 em per character (0.64 in bold, set via
 // em); keep 10% of the width as margin.
@@ -95,20 +107,36 @@ const charsFor = (r: number, fontSize: number, em = 0.58) =>
  * A smaller size is preferred over splitting a word ("Attention" stays
  * whole), down to the third size; after that, long words are hyphenated
  * at the largest size that fits ("Phono-logical loop").
+ *
+ * wholeWords (the centre bubble): words are never split, not even at a
+ * hyphen ("Long-term / memory"); the largest size at which some line
+ * break fits wins. Only a title that fits at no size falls back to the
+ * hyphenating rules above.
  */
-export function fitLabel(title: string, r: number, sizes: number[], maxLines = 3, em = 0.58): Label {
+export function fitLabel(title: string, r: number, sizes: number[], maxLines = 3, em = 0.58, wholeWords = false): Label {
   // Every line must fit the circle's width at its own height (top and
   // bottom lines get less room).
   const chordAt = (y: number) => (Math.abs(y) < r ? 2 * Math.sqrt(r * r - y * y) : 0);
-  const fits = (lines: string[], fontSize: number) => {
+  // margin: share of the line's chord the text may use.
+  const fits = (lines: string[], fontSize: number, margin = 0.94) => {
     const lh = fontSize * 1.18;
     if (lines.length > maxLines || lines.length * lh > r * 1.6) return false;
     return lines.every((line, i) => {
       const yc = (i - (lines.length - 1) / 2) * lh;
       const y = Math.abs(yc) + fontSize * 0.4;
-      return line.length * fontSize * em <= chordAt(y) * 0.94;
+      return line.length * fontSize * em <= chordAt(y) * margin;
     });
   };
+  if (wholeWords) {
+    const words = title.trim().split(/\s+/);
+    for (const fontSize of sizes) {
+      // Fewest lines first, so short titles stay on one line.
+      // The filled centre has no outline to crowd, so text may run a little
+      // closer to its edge.
+      const lines = splits(words, maxLines).find(ls => fits(ls, fontSize, 0.97));
+      if (lines) return { lines, fontSize, lineHeight: fontSize * 1.18 };
+    }
+  }
   const longest = Math.max(...title.split(/\s+/).map(w => w.length));
   for (const fontSize of sizes.slice(0, 3)) {
     const max = charsFor(r, fontSize, em);
@@ -189,7 +217,7 @@ export function layoutWeb(input: LayoutInput, minFont = 0, aspect = 1.1): WebLay
   const r = R_NODE;
   const center: PlacedNode = {
     id: 'center', title: input.centerTitle, x: 0, y: 0, r: R_CENTER,
-    label: fitLabel(input.centerTitle, R_CENTER, atLeast(CENTER_SIZES, minFont), 3, 0.64),
+    label: fitLabel(input.centerTitle, R_CENTER, atLeast(CENTER_SIZES, minFont), 3, 0.64, true),
   };
 
   const items = [
