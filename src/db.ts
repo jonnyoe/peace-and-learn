@@ -285,6 +285,9 @@ export function resetAllProgress(now = new Date()): number {
   db.withTransactionSync(() => {
     n = db.runSync('UPDATE cards SET fsrs = ?, due = ?', empty, now.getTime()).changes;
     db.runSync('DELETE FROM reviews');
+    // Earned lace goes too: every bubble back to no pattern (and, with all
+    // cards new, none is faded).
+    db.runSync('UPDATE concepts SET lace_peak = 0');
   });
   return n;
 }
@@ -597,6 +600,8 @@ export function addSample(now = new Date()) {
         reviews.forEach(r => db.runSync('INSERT INTO reviews (card_id, rating, reviewed_at) VALUES (?, ?, ?)',
           cardId, r.rating, r.at.getTime()));
       });
+      // The seeded history has earned this bubble its lace so far.
+      db.runSync('UPDATE concepts SET lace_peak = ? WHERE id = ?', bubbleStats(getConceptCards(id), now).lace, id);
     });
 
     // After the concepts exist, because center_id is a foreign key.
