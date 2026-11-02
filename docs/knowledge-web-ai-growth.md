@@ -104,5 +104,7 @@ The model returns grammar-constrained JSON:
 9. Explain and Connect prompts in study mode, with on-device grading and feedback.
 10. Shape vocabulary and the recipe renderer. Convert the spec's motifs into built-in recipes and check the seed web still matches the mockup.
 11. AI recipe generation on bubble creation, with validation, fallback, neighbor variety, and the long-press menu.
+12. AI sorting of new concepts into nested webs: when a web gets crowded, the on-device model groups related bubbles into a child web (with a parent bubble that zooms into it), so a web shows its real structure instead of a "+N more" overflow.
+13. Categories for user-added subjects: let the user set (and change) the category of their own subjects, so they appear in the right group on the Webs home screen.
 
 Keep commits small. Run npx tsc --noEmit before each commit.
