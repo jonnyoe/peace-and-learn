@@ -112,6 +112,16 @@ function WebScreenFor({ webKey, onOpen, onHome }: Props) {
 
   return (
     <KeyboardAvoidingView style={st.wrap} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      {studying ? (
+        // Compact header while studying: one short line, so the shrunken web
+        // and the card get the room. End session is the way out.
+        <View style={[st.header, st.headerStudy]}>
+          <View style={st.titleRow}>
+            <Text style={[st.titleStudy, st.titleText]} numberOfLines={1}>{web.title}</Text>
+            {session.phase === 'card' && <Pill label="End session" onPress={endSession} />}
+          </View>
+        </View>
+      ) : (
       <View style={st.header}>
         <View style={st.crumbs}>
           <Crumb label={web.category ?? 'Subjects'} onPress={onHome} first />
@@ -122,11 +132,9 @@ function WebScreenFor({ webKey, onOpen, onHome }: Props) {
             </React.Fragment>
           ))}
         </View>
-        <View style={st.titleRow}>
-          <Text style={[st.title, st.titleText]} numberOfLines={2}>{web.title}</Text>
-          {session.phase === 'card' && <Pill label="End session" onPress={endSession} />}
-        </View>
+        <Text style={st.title} numberOfLines={2}>{web.title}</Text>
       </View>
+      )}
 
       <Animated.View style={outerStyle} onLayout={measure}>
         <Animated.View style={innerStyle}>
@@ -192,7 +200,9 @@ const st = StyleSheet.create({
   crumb: { minHeight: 44, justifyContent: 'center' },
   crumbText: { fontFamily: font.ui, fontSize: size.small, color: color.faint },
   sep: { fontFamily: font.ui, fontSize: size.small, color: color.faint, marginHorizontal: 6 },
-  titleRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  headerStudy: { paddingTop: 4 },
+  titleRow: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 44 },
+  titleStudy: { fontFamily: font.readingBold, fontSize: 22, lineHeight: 28, color: color.ink },
   titleText: { flex: 1 },
   title: { fontFamily: font.readingBold, fontSize: 32, lineHeight: 40, color: color.ink },
   canvasBox: { marginTop: 4, marginBottom: 8 },
