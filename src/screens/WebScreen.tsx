@@ -2,7 +2,7 @@ import React, { useRef, useState } from 'react';
 import {
   View, Text, Pressable, StyleSheet, KeyboardAvoidingView, Platform, Animated, Easing, LayoutChangeEvent,
 } from 'react-native';
-import { getWeb, WebKey } from '../db';
+import { getWeb, getWebLooks, WebKey } from '../db';
 import WebCanvas from '../web/WebCanvas';
 import TodoPanel from '../web/TodoPanel';
 import { useStudySession } from '../study/useStudySession';
@@ -43,6 +43,10 @@ function WebScreenFor({ webKey, onOpen, onHome }: Props) {
       </View>
     );
   }
+
+  // Read fresh on every render, so a rating in study mode shows at once.
+  const looks = getWebLooks(web);
+  if (web.center && looks[web.center.id]) looks.center = looks[web.center.id];
 
   const byId = new Map(web.nodes.map(n => [n.id, n]));
   // Tapping a bubble with its own web zooms into it. Bubbles without one
@@ -134,6 +138,7 @@ function WebScreenFor({ webKey, onOpen, onHome }: Props) {
             onPressCenter={studying ? undefined : startStudy}
             onPressNode={pressNode}
             ringId={ringId}
+            looks={looks}
           />
         </Animated.View>
       </Animated.View>

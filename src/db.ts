@@ -1,5 +1,6 @@
 import * as SQLite from 'expo-sqlite';
 import { Card as FsrsCard, createEmptyCard } from 'ts-fsrs';
+import { bubbleStats, BubbleStats } from './knowledge';
 import {
   BUBBLES, SAMPLE_CATEGORY, SAMPLE_DOMAIN, SAMPLE_PREFIX, TODOS, sampleId, simulate,
 } from './seed/memory';
@@ -468,6 +469,35 @@ export function getStudyCards(key: WebKey): WebStudyCard[] {
     return x && visible.has(x) ? x : null;
   };
   return rows.map(r => ({ ...r, fsrs: fromJson(r.fsrs), anchor_id: anchor(r.concept_id) }));
+}
+
+// ---------- Derived visuals ----------
+// How each bubble of a web looks (spec sections 3 and 5): faded or not, lace
+// level, and one satellite per bubble in its nested web, carrying that inner
+// bubble's recall (null = no reviewed cards yet).
+export type NodeLook = BubbleStats & { satellites: (number | null)[] };
+
+export function getWebLooks(web: WebView, now = new Date()): Record<string, NodeLook> {
+  const ids = [web.center, ...web.nodes].filter((n): n is WebNode => !!n).map(n => n.id);
+  if (!ids.length) return {};
+  const children = db.getAllSync<{ id: string; parent_id: string }>(
+    'SELECT id, parent_id FROM concepts WHERE parent_id IN (' + placeholders(ids.length) + ') ORDER BY created_at, title',
+    ...ids);
+  const all = [...ids, ...children.map(c => c.id)];
+  const cards: Record<string, FsrsCard[]> = {};
+  db.getAllSync<{ concept_id: string; fsrs: string }>(
+    'SELECT concept_id, fsrs FROM cards WHERE concept_id IN (' + placeholders(all.length) + ')', ...all)
+    .forEach(r => (cards[r.concept_id] ??= []).push(fromJson(r.fsrs)));
+  const stats = (id: string) => bubbleStats(cards[id] ?? [], now);
+
+  const looks: Record<string, NodeLook> = {};
+  for (const id of ids) looks[id] = { ...stats(id), satellites: [] };
+  // The centre's nested web is the web on screen, so it gets no satellites.
+  const centerId = web.center?.id;
+  for (const c of children) {
+    if (c.parent_id !== centerId) looks[c.parent_id].satellites.push(stats(c.id).recall);
+  }
+  return looks;
 }
 
 /** FSRS state of every card in one bubble, for its lace level. */
