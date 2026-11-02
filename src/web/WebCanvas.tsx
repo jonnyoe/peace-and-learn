@@ -62,12 +62,18 @@ export default function WebCanvas({ centerTitle, nodes, edges, onPressCenter, on
   // it. Pass 2 refits the labels so none is drawn under MIN_LABEL_PT on
   // screen (placement doesn't depend on labels, so the box is the same).
   const aspect = area.w && area.h ? Math.round((area.h / area.w) * 20) / 20 : 1.1;
-  const geo = useMemo(() => layoutWeb({ centerTitle, nodes, edges }, 0, aspect), [centerTitle, nodes, edges, aspect]);
+  // The screen reads the web fresh on every render (new arrays each time),
+  // so key the layout on its content: the same web keeps the same placed
+  // bubbles, and unchanged bubbles skip re-rendering (Bubble is memoized).
+  const shape = JSON.stringify([centerTitle, nodes.map(n => [n.id, n.title]), edges.map(e => [e.from_id, e.to_id])]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const input = useMemo(() => ({ centerTitle, nodes, edges }), [shape]);
+  const geo = useMemo(() => layoutWeb(input, 0, aspect), [input, aspect]);
   const fit = area.w && area.h ? Math.min(area.w / geo.box.w, area.h / geo.box.h) : 0;
   const minFont = fit ? Math.round((MIN_LABEL_PT / fit) * 10) / 10 : 0;
   const web = useMemo(
-    () => (minFont ? layoutWeb({ centerTitle, nodes, edges }, minFont, aspect) : geo),
-    [geo, minFont, centerTitle, nodes, edges, aspect]);
+    () => (minFont ? layoutWeb(input, minFont, aspect) : geo),
+    [geo, minFont, input, aspect]);
 
   const onLayout = (e: LayoutChangeEvent) => {
     const { width, height } = e.nativeEvent.layout;
@@ -144,7 +150,9 @@ function target(cx: number, cy: number, r: number) {
 
 // A strand: solid ink, or dashed grey to a faded bubble. When both ends are
 // well learned, small bead pairs sit along the part between the bubbles.
-function Strand({ a, b, faded, beads }: { a: PlacedNode; b: PlacedNode; faded: boolean; beads: boolean }) {
+const Strand = React.memo(StrandView);
+
+function StrandView({ a, b, faded, beads }: { a: PlacedNode; b: PlacedNode; faded: boolean; beads: boolean }) {
   const dx = b.x - a.x, dy = b.y - a.y;
   const len = Math.hypot(dx, dy) || 1;
   const ux = dx / len, uy = dy / len;   // along the strand
@@ -302,7 +310,19 @@ function Satellites({ node, recalls }: { node: PlacedNode; recalls: (number | nu
   );
 }
 
-function Bubble({ node, center, look, still }: { node: PlacedNode; center?: boolean; look?: Look; still: boolean }) {
+type BubbleProps = { node: PlacedNode; center?: boolean; look?: Look; still: boolean };
+
+// Recall drifts a little on every draw as time passes; only a visible
+// change (to 4 decimals, as the lace ink uses) re-renders a bubble.
+const r4 = (v: number | null | undefined) => (v == null ? null : Math.floor(v * 10000));
+const sameLook = (a?: Look, b?: Look) => a === b || (!!a && !!b &&
+  a.lace === b.lace && a.faded === b.faded && r4(a.recall) === r4(b.recall) &&
+  JSON.stringify(a.pattern ?? null) === JSON.stringify(b.pattern ?? null) &&
+  a.satellites.length === b.satellites.length && a.satellites.every((v, i) => r4(v) === r4(b.satellites[i])));
+const Bubble = React.memo(BubbleView, (a: BubbleProps, b: BubbleProps) =>
+  a.node === b.node && a.center === b.center && a.still === b.still && sameLook(a.look, b.look));
+
+function BubbleView({ node, center, look, still }: BubbleProps) {
   const { x, y, r, label } = node;
   const faded = !!look?.faded;
   // A faded centre turns grey instead of dashed, so its white text stays readable.
