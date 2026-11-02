@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View, Text, Pressable, StyleSheet, KeyboardAvoidingView, Platform, Animated, Easing, LayoutChangeEvent,
 } from 'react-native';
@@ -34,6 +34,14 @@ function WebScreenFor({ webKey, onOpen, onHome }: Props) {
   const [full, setFull] = useState<{ w: number; h: number } | null>(null);
   const [shrunk, setShrunk] = useState(false);
   const t = useRef(new Animated.Value(0)).current;
+  const animGen = useRef(0);
+  const mounted = useRef(true);
+  // Leaving the web (breadcrumb, Subjects, another tab) unmounts this screen,
+  // which drops the session with it. Stop any running animation too.
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; animGen.current++; t.stopAnimation(); };
+  }, [t]);
 
   if (!web) {
     return (
@@ -57,14 +65,21 @@ function WebScreenFor({ webKey, onOpen, onHome }: Props) {
     if (n && n.childCount > 0) onOpen({ domain: web!.key.domain, parentId: n.id });
   }
 
+  // Only the latest animation may finish. Starting a session while the web
+  // is still growing back stops that animation, and its callback must not
+  // then switch the web back to full size under the new session.
   function animate(to: number, done?: () => void) {
+    const gen = ++animGen.current;
+    t.stopAnimation();
     Animated.timing(t, {
       toValue: to, duration: 450, easing: Easing.inOut(Easing.cubic), useNativeDriver: false,
-    }).start(done);
+    }).start(({ finished }) => {
+      if (finished && gen === animGen.current && mounted.current) done?.();
+    });
   }
 
   function startStudy() {
-    if (!full) return;
+    if (!full || session.phase !== 'off') return;
     session.start();
     setShrunk(true);
     animate(1);

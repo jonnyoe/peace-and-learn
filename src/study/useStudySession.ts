@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Grade, Rating } from 'ts-fsrs';
 import { getConceptCards, getStudyCards, saveReview, WebKey, WebStudyCard } from '../db';
 import { bubbleStats, orderForStudy } from '../knowledge';
@@ -28,19 +28,26 @@ const OFF: Session = { phase: 'off', queue: [], index: 0, revealed: false, revie
 const laceOf = (conceptId: string, now: Date) => bubbleStats(getConceptCards(conceptId), now).lace;
 
 export function useStudySession(webKey: WebKey) {
-  const [s, setS] = useState<Session>(OFF);
+  const [s, setState] = useState<Session>(OFF);
+  // The latest session, updated synchronously. Actions read this instead of
+  // the rendered state, so a fast double tap on a rating can't rate the same
+  // card twice or skip one.
+  const ref = useRef<Session>(OFF);
+  const set = (next: Session) => { ref.current = next; setState(next); };
 
+  /** Always a brand-new session: fresh queue, first card, answer hidden. */
   function start() {
     const queue = orderForStudy(getStudyCards(webKey), new Date(), SESSION_SIZE);
-    setS({ ...OFF, phase: queue.length ? 'card' : 'summary', queue });
+    set({ ...OFF, phase: queue.length ? 'card' : 'summary', queue });
   }
 
   function reveal() {
-    setS(p => ({ ...p, revealed: true }));
+    if (ref.current.phase === 'card') set({ ...ref.current, revealed: true });
   }
 
   function rate(grade: Grade) {
-    const card = s.queue[s.index];
+    const s = ref.current;
+    const card = s.phase === 'card' && s.revealed ? s.queue[s.index] : undefined;
     if (!card) return;
     const now = new Date();
     const before = laceOf(card.concept_id, now);
@@ -54,7 +61,7 @@ export function useStudySession(webKey: WebKey) {
     const sendBack = again && !s.requeued.includes(card.id);
     const queue = sendBack ? [...s.queue, { ...card, fsrs: next }] : s.queue;
     const index = s.index + 1;
-    setS({
+    set({
       ...s, queue, index, grew, revealed: false, reviewed: s.reviewed + 1,
       requeued: sendBack ? [...s.requeued, card.id] : s.requeued,
       phase: index < queue.length ? 'card' : 'summary',
@@ -63,11 +70,12 @@ export function useStudySession(webKey: WebKey) {
 
   /** End session: shows the summary (the caller skips it if nothing was rated). */
   function end() {
-    setS(p => ({ ...p, phase: 'summary', revealed: false }));
+    if (ref.current.phase === 'card') set({ ...ref.current, phase: 'summary', revealed: false });
   }
 
+  /** Clears everything: queue, position, revealed answer, what grew. */
   function close() {
-    setS(OFF);
+    set(OFF);
   }
 
   return {
