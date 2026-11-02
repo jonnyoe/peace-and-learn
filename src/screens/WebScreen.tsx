@@ -10,6 +10,10 @@ import TodoPanel from '../web/TodoPanel';
 import { useStudySession } from '../study/useStudySession';
 import { SessionSummary, StudyCardView } from '../study/StudyCard';
 import { color, font, size } from '../theme';
+import CenterMenu from '../organize/CenterMenu';
+import Notice from '../organize/Notice';
+import OrganizeView from '../organize/OrganizeView';
+import { canUndo, dismissSuggestion, shouldSuggest, undoOrganize } from '../organize/store';
 
 // The home of each subject (spec section 4a): breadcrumb, title, the web
 // and its to-do panel. Tapping the centre starts study mode (4b): the panel
@@ -36,6 +40,12 @@ export default function WebScreen(props: Props) {
 }
 
 function WebScreenFor({ webKey, onOpen, onHome }: Props) {
+  // Organize changes the web in the database; bumping this re-reads it.
+  const [, setVersion] = useState(0);
+  const refresh = () => setVersion(v => v + 1);
+  const [menu, setMenu] = useState(false);
+  const [organizing, setOrganizing] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
   const web = getWeb(webKey);
   const session = useStudySession(webKey);
   const studying = session.phase !== 'off';
@@ -45,7 +55,7 @@ function WebScreenFor({ webKey, onOpen, onHome }: Props) {
   // through a ref so the pan responder (created once) sees the latest.
   const up = useRef<() => void>(() => {});
   up.current = () => {
-    if (studying || !web) return; // no swipe-back mid-session; End is the way out
+    if (studying || organizing || !web) return; // no swipe-back mid-session or mid-organize
     const parent = web.breadcrumb[web.breadcrumb.length - 1];
     if (parent) onOpen(parent.key); else onHome();
   };
@@ -93,8 +103,8 @@ function WebScreenFor({ webKey, onOpen, onHome }: Props) {
   if (web.center && looks[web.center.id]) looks.center = looks[web.center.id];
 
   const byId = new Map(web.nodes.map(n => [n.id, n]));
-  // Tapping a bubble with its own web zooms into it. Bubbles without one
-  // do nothing yet; the "+N more" bubble neither (organising big webs comes later).
+  // Tapping a bubble with its own web (a group made by Organize, or a
+  // nested web) zooms into it. Bubbles without one do nothing yet.
   function pressNode(id: string) {
     if (studying) return;
     const n = byId.get(id);
@@ -115,6 +125,7 @@ function WebScreenFor({ webKey, onOpen, onHome }: Props) {
   }
 
   function startStudy() {
+    setNotice(null);
     startedAt.current = Date.now();
     if (!full || session.phase !== 'off') return;
     session.start();
@@ -183,11 +194,50 @@ function WebScreenFor({ webKey, onOpen, onHome }: Props) {
       nodes={web.nodes}
       edges={web.edges}
       onPressCenter={studying ? undefined : startStudy}
+      onLongPressCenter={studying ? undefined : () => setMenu(true)}
       onPressNode={pressNode}
       ringId={ringId}
       looks={looks}
     />
   );
+
+  if (organizing) {
+    return (
+      <View style={st.wrap}>
+        <OrganizeView
+          web={web}
+          bottomInset={insets.bottom}
+          onCancel={() => setOrganizing(false)}
+          onApplied={n => {
+            setOrganizing(false);
+            setNotice(n
+              ? 'Organized into ' + n + ' group' + (n === 1 ? '' : 's') + '. To put it back, long-press the centre and choose Undo organize.'
+              : 'Nothing was changed.');
+            refresh();
+          }}
+        />
+      </View>
+    );
+  }
+
+  const count = web.nodes.length;
+  function organize() { setMenu(false); setNotice(null); setOrganizing(true); }
+  function undo() {
+    setMenu(false);
+    setNotice(undoOrganize(web!.key) ? 'Undone: the web is back as it was before organizing.' : 'There is nothing to undo here.');
+    refresh();
+  }
+  // Crowded web: suggest organizing (this replaces the old "+N more" bubble).
+  const banner = studying ? null : notice ? (
+    <Notice text={notice} onClose={() => setNotice(null)} closeLabel="OK" />
+  ) : shouldSuggest(web.key, count) ? (
+    <Notice
+      text={count + ' bubbles is a lot for one web. Let the on-device model group related ones?'}
+      action="Organize"
+      onAction={organize}
+      onClose={() => { dismissSuggestion(web!.key, count); refresh(); }}
+    />
+  ) : null;
 
   return (
     <KeyboardAvoidingView style={st.wrap} behavior={Platform.OS === 'ios' ? 'padding' : undefined} {...swipe.panHandlers}>
@@ -210,6 +260,17 @@ function WebScreenFor({ webKey, onOpen, onHome }: Props) {
         </View>
         <Text style={st.title} numberOfLines={2}>{web.title}</Text>
       </View>
+      )}
+      {banner}
+      {menu && (
+        <CenterMenu
+          title={web.center?.title ?? web.title}
+          bubbles={count}
+          canUndo={canUndo(web.key)}
+          onOrganize={organize}
+          onUndo={undo}
+          onClose={() => setMenu(false)}
+        />
       )}
 
       <Animated.View style={outerStyle} onLayout={measure}>

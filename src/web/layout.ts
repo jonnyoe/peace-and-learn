@@ -4,7 +4,6 @@
 
 export const R_NODE = 38;
 export const R_CENTER = 46;
-export const MAX_SHOWN = 8;  // more than this and the rest fold into "+N more"
 // How far a full pattern (lace or satellites) reaches beyond a bubble's
 // edge: the widest motif (hub) reaches 39.3 plus half its 1.1 line, so 40
 // covers every motif. Two full patterns are kept PATTERN_GAP apart, so
@@ -24,11 +23,10 @@ export type LayoutInput = {
 export type Label = { lines: string[]; fontSize: number; lineHeight: number };
 
 export type PlacedNode = {
-  id: string;            // concept id, or "more" for the "+N more" bubble
+  id: string;            // concept id
   title: string;
   x: number; y: number; r: number;
   label: Label;
-  hiddenIds?: string[];  // on the "+N more" bubble: what it stands for
 };
 
 export type Strand = { from: string; to: string; x1: number; y1: number; x2: number; y2: number };
@@ -217,17 +215,10 @@ const atLeast = (sizes: number[], min: number) => [...new Set(sizes.map(s => Mat
  * natural units (WebCanvas passes 12 pt divided by its scale).
  */
 export function layoutWeb(input: LayoutInput, minFont = 0, aspect = 1.1): WebLayout {
+  // Every bubble is drawn: a crowded web gets smaller bubbles, and the web
+  // screen suggests organizing it into groups (src/organize) instead of
+  // folding the rest into a "+N more" bubble.
   const { nodes, edges } = input;
-
-  // Too many to fit: keep the best connected ones, in their original order.
-  let shown = nodes;
-  let hidden: typeof nodes = [];
-  if (nodes.length > MAX_SHOWN) {
-    const degree = (id: string) => edges.filter(e => e.from_id === id || e.to_id === id).length;
-    const keep = new Set([...nodes].sort((a, b) => degree(b.id) - degree(a.id)).slice(0, MAX_SHOWN - 1).map(n => n.id));
-    shown = nodes.filter(n => keep.has(n.id));
-    hidden = nodes.filter(n => !keep.has(n.id));
-  }
 
   const r = R_NODE;
   const center: PlacedNode = {
@@ -235,10 +226,7 @@ export function layoutWeb(input: LayoutInput, minFont = 0, aspect = 1.1): WebLay
     label: fitLabel(input.centerTitle, R_CENTER, atLeast(CENTER_SIZES, minFont), 3, 0.64, true),
   };
 
-  const items = [
-    ...shown.map(n => ({ id: n.id, title: n.title, hiddenIds: undefined as string[] | undefined })),
-    ...(hidden.length ? [{ id: 'more', title: '+' + hidden.length + ' more', hiddenIds: hidden.map(h => h.id) }] : []),
-  ];
+  const items = nodes.map(n => ({ id: n.id, title: n.title }));
   const n = items.length;
 
   // Bounding box (pattern room included) of a placement.

@@ -10,6 +10,7 @@ import ImportScreen from './src/screens/ImportScreen';
 import MapScreen from './src/screens/MapScreen';
 import ModelScreen from './src/screens/ModelScreen';
 import { color, font, size, useThemeFonts } from './src/theme';
+import { resetSuggestion, SUGGEST_ABOVE } from './src/organize/store';
 
 initDb();
 
@@ -41,6 +42,21 @@ export default function App() {
     setTab(t);
   }
 
+  // After saving cards: new bubbles land in the subject's top-level web. If
+  // that web is now crowded, open it, so its Organize suggestion shows
+  // (even if it was dismissed before). Otherwise go to the Map as before.
+  function afterSave(domain: string) {
+    const key: WebKey = { domain, parentId: null };
+    const saved = getWeb(key);
+    if (saved && saved.nodes.length > SUGGEST_ABOVE) {
+      resetSuggestion(key);
+      setPlace(key);
+      setTab('web');
+    } else {
+      setTab('map');
+    }
+  }
+
   if (!fontsReady) return <View style={st.root} />;
 
   return (
@@ -55,7 +71,7 @@ export default function App() {
             ? <WebScreen webKey={place} onOpen={setPlace} onHome={() => setPlace(null)} />
             : <HomeScreen onOpen={setPlace} />)}
           {tab === 'review' && <ReviewScreen onGoImport={() => setTab('add')} />}
-          {tab === 'add' && <ImportScreen onSaved={() => setTab('map')} />}
+          {tab === 'add' && <ImportScreen onSaved={afterSave} />}
           {tab === 'map' && <MapScreen />}
           {tab === 'model' && <ModelScreen />}
         </View>

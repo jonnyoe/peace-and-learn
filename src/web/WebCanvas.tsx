@@ -45,14 +45,14 @@ export function useReduceMotion(): boolean {
   return on;
 }
 
-export default function WebCanvas({ centerTitle, nodes, edges, onPressCenter, onPressNode, ringId, looks, minLabelPt = MIN_LABEL_PT }: {
+export default function WebCanvas({ centerTitle, nodes, edges, onPressCenter, onLongPressCenter, onPressNode, ringId, looks, minLabelPt = MIN_LABEL_PT }: {
   centerTitle: string;
   nodes: CanvasNode[];
   edges: { from_id: string; to_id: string }[];
   onPressCenter?: () => void;
-  onPressNode?: (id: string, hiddenIds?: string[]) => void;
-  // Study mode: draw a dashed ring around this bubble ('center' for the
-  // centre). A bubble folded into "+N more" rings that bubble instead.
+  onLongPressCenter?: () => void; // the centre's menu (Organize, Undo organize)
+  onPressNode?: (id: string) => void;
+  // Study mode: draw a dashed ring around this bubble ('center' for the centre).
   ringId?: string | null;
   looks?: Record<string, Look>; // by node id; 'center' for the centre
   // Smallest label size on screen. The small study-mode web passes 0, so
@@ -84,7 +84,7 @@ export default function WebCanvas({ centerTitle, nodes, edges, onPressCenter, on
   };
 
   const ringed = !ringId ? null : ringId === 'center' ? web.center
-    : web.nodes.find(n => n.id === ringId || n.hiddenIds?.includes(ringId)) ?? null;
+    : web.nodes.find(n => n.id === ringId) ?? null;
   const lookOf = (id: string): Look | undefined => looks?.[id];
   const placed = new Map([web.center, ...web.nodes].map(n => [n.id, n]));
 
@@ -127,16 +127,20 @@ export default function WebCanvas({ centerTitle, nodes, edges, onPressCenter, on
               key={n.id}
               accessibilityRole="button"
               accessibilityLabel={n.title + (lookOf(n.id)?.faded ? ', needs review' : '')}
-              onPress={() => onPressNode?.(n.id, n.hiddenIds)}
+              onPress={() => onPressNode?.(n.id)}
               style={target(sx(n.x), sy(n.y), n.r * scale)}
             />
           ))}
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={centerTitle}
-            accessibilityHint={onPressCenter ? 'Starts a study session' : undefined}
+            accessibilityHint={onPressCenter ? 'Starts a study session' + (onLongPressCenter ? '. Long-press for options.' : '') : undefined}
+            accessibilityActions={onLongPressCenter ? [{ name: 'longpress', label: 'Options' }] : undefined}
+            onAccessibilityAction={e => { if (e.nativeEvent.actionName === 'longpress') onLongPressCenter?.(); }}
             onPress={onPressCenter}
-            disabled={!onPressCenter}
+            onLongPress={onLongPressCenter}
+            delayLongPress={450}
+            disabled={!onPressCenter && !onLongPressCenter}
             style={target(sx(0), sy(0), web.center.r * scale)}
           />
         </>

@@ -96,6 +96,20 @@ export function initDb() {
   seedSampleIfEmpty();
 }
 
+function createOrganizeTable() {
+  // The latest organize, so it can be undone (src/organize/store.ts). Only
+  // one row is kept: a new organize replaces it.
+  db.execSync(`
+    CREATE TABLE IF NOT EXISTS organize_undo (
+      id TEXT PRIMARY KEY,
+      domain TEXT NOT NULL,
+      web_id TEXT,
+      data TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    );
+  `);
+}
+
 // Migrations for installs created before a column existed. Each step checks
 // the current schema first, so it is safe to run on every launch.
 //
@@ -138,6 +152,7 @@ function migrate() {
     CREATE INDEX IF NOT EXISTS idx_concepts_parent ON concepts(domain, parent_id);
     CREATE INDEX IF NOT EXISTS idx_todos_web ON todos(domain, web_id);
   `);
+  createOrganizeTable();
 }
 
 // ---------- FSRS state (de)serialization ----------
@@ -501,12 +516,8 @@ export function getWebLooks(web: WebView, now = new Date()): Record<string, Node
   const children = db.getAllSync<{ id: string; parent_id: string }>(
     'SELECT id, parent_id FROM concepts WHERE parent_id IN (' + placeholders(ids.length) + ') ORDER BY created_at, title',
     ...ids);
-  const all = [...ids, ...children.map(c => c.id)];
-  const cards: Record<string, FsrsCard[]> = {};
-  db.getAllSync<{ concept_id: string; fsrs: string }>(
-    'SELECT concept_id, fsrs FROM cards WHERE concept_id IN (' + placeholders(all.length) + ')', ...all)
-    .forEach(r => (cards[r.concept_id] ??= []).push(fromJson(r.fsrs)));
-  const stats = (id: string) => bubbleStats(cards[id] ?? [], now);
+  const cardsOf = effectiveCards(web.key.domain);
+  const stats = (id: string) => bubbleStats(cardsOf(id), now);
 
   const looks: Record<string, NodeLook> = {};
   const patterns = new Map([web.center, ...web.nodes].filter((n): n is WebNode => !!n).map(n => [n.id, n.pattern]));
@@ -521,6 +532,26 @@ export function getWebLooks(web: WebView, now = new Date()): Record<string, Node
     if (c.parent_id !== centerId) looks[c.parent_id].satellites.push(stats(c.id).recall);
   }
   return looks;
+}
+
+/**
+ * Cards that set a bubble's look. A bubble's own cards; or, for a bubble
+ * with none that holds a web (a group made by Organize), every card in
+ * that web and the webs inside it. So a group fades and grows lace with
+ * what it contains.
+ */
+export function effectiveCards(domain: string): (id: string) => FsrsCard[] {
+  const own: Record<string, FsrsCard[]> = {};
+  db.getAllSync<{ concept_id: string; fsrs: string }>(
+    'SELECT k.concept_id, k.fsrs FROM cards k JOIN concepts c ON c.id = k.concept_id WHERE c.domain = ?', domain)
+    .forEach(r => (own[r.concept_id] ??= []).push(fromJson(r.fsrs)));
+  const kids: Record<string, string[]> = {};
+  db.getAllSync<{ id: string; parent_id: string }>(
+    'SELECT id, parent_id FROM concepts WHERE domain = ? AND parent_id IS NOT NULL', domain)
+    .forEach(r => (kids[r.parent_id] ??= []).push(r.id));
+  const below = (id: string, depth: number): FsrsCard[] => depth > 32 ? [] :
+    (kids[id] ?? []).flatMap(k => [...(own[k] ?? []), ...below(k, depth + 1)]);
+  return (id: string) => (own[id]?.length ? own[id] : below(id, 0));
 }
 
 function lacePeaks(ids: string[]): Record<string, number> {

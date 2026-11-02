@@ -34,7 +34,7 @@ function KeyboardScreen({ children }: { children: React.ReactNode }) {
 }
 type DraftSource = { id: string; pages: number[]; label: string };
 
-export default function ImportScreen({ onSaved }: { onSaved: () => void }) {
+export default function ImportScreen({ onSaved }: { onSaved: (domain: string) => void }) {
   const [text, setText] = useState('');
   const [domain, setDomain] = useState('');
   const [draft, setDraft] = useState<Draft | null>(null);
@@ -157,7 +157,7 @@ export default function ImportScreen({ onSaved }: { onSaved: () => void }) {
     setDraft(null); setDraftSource(null); setSourceId(null);
     if (!draftSource) setText('');
     setSources(getSources());
-    onSaved();
+    onSaved(subject);
   }
 
   const busyRow = (

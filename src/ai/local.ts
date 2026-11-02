@@ -65,29 +65,40 @@ async function ensureLoaded(modelId: string, onStatus: (s: string) => void) {
   return ctx;
 }
 
-export async function generateLocal(
-  modelId: string, text: string, domain: string, known: KnownConcept[], onStatus: (s: string) => void,
-): Promise<string> {
+/**
+ * One grammar-constrained completion: the reply always matches schema.
+ * Used for card drafts (generateLocal) and for organizing webs.
+ */
+export async function completeJson({ modelId, system, user, schema, maxTokens, onStatus, progress }: {
+  modelId: string; system: string; user: string; schema: object; maxTokens: number;
+  onStatus: (s: string) => void; progress: (tokens: number) => string;
+}): Promise<string> {
   const c = await ensureLoaded(modelId, onStatus);
   let tokens = 0;
   const res = await c.completion(
     {
-      messages: [
-        { role: 'system', content: SYSTEM },
-        { role: 'user', content: userMessage(text, domain, known) },
-      ],
-      response_format: { type: 'json_schema', json_schema: { strict: true, schema: SCHEMA } },
+      messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
+      response_format: { type: 'json_schema', json_schema: { strict: true, schema } },
       enable_thinking: false, // Qwen3: skip the reasoning block, go straight to JSON
-      n_predict: 1600,
+      n_predict: maxTokens,
       temperature: 0.3,
       stop: STOP,
     },
     () => {
       tokens++;
-      if (tokens % 20 === 0) onStatus(`Writing cards… ${tokens} tokens`);
+      if (tokens % 20 === 0) onStatus(progress(tokens));
     },
   );
   return res.text;
+}
+
+export async function generateLocal(
+  modelId: string, text: string, domain: string, known: KnownConcept[], onStatus: (s: string) => void,
+): Promise<string> {
+  return completeJson({
+    modelId, system: SYSTEM, user: userMessage(text, domain, known), schema: SCHEMA, maxTokens: 1600,
+    onStatus, progress: n => `Writing cards… ${n} tokens`,
+  });
 }
 
 export async function stopGenerating() {
