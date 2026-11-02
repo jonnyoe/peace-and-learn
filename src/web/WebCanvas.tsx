@@ -45,13 +45,12 @@ function useReduceMotion(): boolean {
   return on;
 }
 
-export default function WebCanvas({ centerTitle, nodes, edges, onPressCenter, onPressNode, centerHint, ringId, looks }: {
+export default function WebCanvas({ centerTitle, nodes, edges, onPressCenter, onPressNode, ringId, looks }: {
   centerTitle: string;
   nodes: CanvasNode[];
   edges: { from_id: string; to_id: string }[];
   onPressCenter?: () => void;
   onPressNode?: (id: string, hiddenIds?: string[]) => void;
-  centerHint?: string; // small caps line under the centre title, e.g. "TAP TO STUDY"
   // Study mode: draw a dashed ring around this bubble ('center' for the
   // centre). A bubble folded into "+N more" rings that bubble instead.
   ringId?: string | null;
@@ -106,7 +105,7 @@ export default function WebCanvas({ centerTitle, nodes, edges, onPressCenter, on
               );
             })}
             {web.nodes.map(n => <Bubble key={n.id} node={n} look={lookOf(n.id)} still={still} />)}
-            <Bubble node={web.center} center hint={centerHint} look={lookOf('center')} still={still} />
+            <Bubble node={web.center} center look={lookOf('center')} still={still} />
             {ringed && (
               <Circle cx={ringed.x} cy={ringed.y} r={ringed.r + 9} fill="none" stroke={color.ink} strokeWidth={2} strokeDasharray="5 4" />
             )}
@@ -125,7 +124,8 @@ export default function WebCanvas({ centerTitle, nodes, edges, onPressCenter, on
           ))}
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel={centerTitle + (centerHint ? ', ' + centerHint.toLowerCase() : '')}
+            accessibilityLabel={centerTitle}
+            accessibilityHint={onPressCenter ? 'Starts a study session' : undefined}
             onPress={onPressCenter}
             disabled={!onPressCenter}
             style={target(sx(0), sy(0), web.center.r * scale)}
@@ -302,16 +302,14 @@ function Satellites({ node, recalls }: { node: PlacedNode; recalls: (number | nu
   );
 }
 
-function Bubble({ node, center, hint, look, still }: { node: PlacedNode; center?: boolean; hint?: string; look?: Look; still: boolean }) {
+function Bubble({ node, center, look, still }: { node: PlacedNode; center?: boolean; look?: Look; still: boolean }) {
   const { x, y, r, label } = node;
   const faded = !!look?.faded;
   // A faded centre turns grey instead of dashed, so its white text stays readable.
   const fill = center ? (faded ? color.fadedBorder : color.ink) : color.panel;
   const fg = center ? color.panel : faded ? color.faint : color.ink;
-  const hintSize = label.hintSize ?? 8.5;
-  const hintGap = hint && center ? 13.5 : 0; // HINT_ROOM in layout.ts
-  // Vertically centre the text block (title lines plus the hint line).
-  const blockH = label.lines.length * label.lineHeight + hintGap;
+  // Vertically centre the title lines.
+  const blockH = label.lines.length * label.lineHeight;
   const firstBaseline = y - blockH / 2 + label.lineHeight * 0.78;
   return (
     <G>
@@ -337,19 +335,6 @@ function Bubble({ node, center, hint, look, still }: { node: PlacedNode; center?
           {line}
         </SvgText>
       ))}
-      {!!hint && center && (
-        <SvgText
-          x={x}
-          y={firstBaseline + (label.lines.length - 1) * label.lineHeight + hintGap + 2}
-          fontSize={hintSize}
-          fontFamily={font.uiMedium}
-          letterSpacing={label.hintSpacing ?? 1.2}
-          fill={fg}
-          textAnchor="middle"
-        >
-          {hint}
-        </SvgText>
-      )}
     </G>
   );
 }

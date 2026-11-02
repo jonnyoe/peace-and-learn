@@ -12,8 +12,6 @@ export const PATTERN_GAP = 4;
 // The drawing box keeps this much room around every bubble, so a full
 // pattern is never cut off at the edge of the web area.
 const EDGE_ROOM = PATTERN_REACH + 1;
-// Height kept under the centre title for the small "TAP TO STUDY" line.
-const HINT_ROOM = 13.5;
 
 export type LayoutInput = {
   centerTitle: string;
@@ -21,15 +19,7 @@ export type LayoutInput = {
   edges: { from_id: string; to_id: string }[];
 };
 
-export type Label = {
-  lines: string[]; fontSize: number; lineHeight: number;
-  hintSize?: number; hintSpacing?: number; // centre only: the "TAP TO STUDY" line
-};
-
-// "TAP TO STUDY" in IBM Plex Sans Medium caps: about 0.65 em per letter,
-// 0.28 em per space, plus letter spacing between its 12 characters.
-const hintWidth = (size: number, spacing: number) => size * (10 * 0.65 + 2 * 0.28) + 11 * spacing;
-const HINT_STYLES: [number, number][] = [[8.5, 1.2], [8.5, 0.6], [8, 0.6]]; // size, letter spacing; first that fits
+export type Label = { lines: string[]; fontSize: number; lineHeight: number };
 
 export type PlacedNode = {
   id: string;            // concept id, or "more" for the "+N more" bubble
@@ -106,35 +96,24 @@ const charsFor = (r: number, fontSize: number, em = 0.58) =>
  * whole), down to the third size; after that, long words are hyphenated
  * at the largest size that fits ("Phono-logical loop").
  */
-export function fitLabel(title: string, r: number, sizes: number[], maxLines = 3, em = 0.58, hintRoom = 0): Label {
+export function fitLabel(title: string, r: number, sizes: number[], maxLines = 3, em = 0.58): Label {
   // Every line must fit the circle's width at its own height (top and
-  // bottom lines get less room), with room kept below for a hint line.
+  // bottom lines get less room).
   const chordAt = (y: number) => (Math.abs(y) < r ? 2 * Math.sqrt(r * r - y * y) : 0);
-  // The hint sits at the bottom of the text block, where the circle is narrower.
-  const hintStyle = (lines: string[], fontSize: number) => {
-    const room = chordAt((lines.length * fontSize * 1.18 + hintRoom) / 2) * 0.97;
-    return HINT_STYLES.find(([size, sp]) => hintWidth(size, sp) <= room);
-  };
   const fits = (lines: string[], fontSize: number) => {
     const lh = fontSize * 1.18;
-    if (lines.length > maxLines || lines.length * lh + hintRoom > r * 1.6) return false;
-    if (hintRoom && !hintStyle(lines, fontSize)) return false;
+    if (lines.length > maxLines || lines.length * lh > r * 1.6) return false;
     return lines.every((line, i) => {
-      const yc = (i - (lines.length - 1) / 2) * lh - hintRoom / 2;
+      const yc = (i - (lines.length - 1) / 2) * lh;
       const y = Math.abs(yc) + fontSize * 0.4;
       return line.length * fontSize * em <= chordAt(y) * 0.94;
     });
-  };
-  const withHint = (l: Label): Label => {
-    if (!hintRoom) return l;
-    const [hintSize, hintSpacing] = hintStyle(l.lines, l.fontSize) ?? HINT_STYLES[HINT_STYLES.length - 1];
-    return { ...l, hintSize, hintSpacing };
   };
   const longest = Math.max(...title.split(/\s+/).map(w => w.length));
   for (const fontSize of sizes.slice(0, 3)) {
     const max = charsFor(r, fontSize, em);
     const lines = wrap(title, max);
-    if (longest <= max && fits(lines, fontSize)) return withHint({ lines, fontSize, lineHeight: fontSize * 1.18 });
+    if (longest <= max && fits(lines, fontSize)) return { lines, fontSize, lineHeight: fontSize * 1.18 };
   }
   // Hyphenate, but split each word at most once if any size allows it
   // ("Consoli-dation" rather than "Conso-lida-tion").
@@ -144,14 +123,14 @@ export function fitLabel(title: string, r: number, sizes: number[], maxLines = 3
       const max = charsFor(r, fontSize, em);
       if (once && words.some(w => hyphenate(w, max).length > 2)) continue;
       const lines = wrap(title, max);
-      if (fits(lines, fontSize)) return withHint({ lines, fontSize, lineHeight: fontSize * 1.18 });
+      if (fits(lines, fontSize)) return { lines, fontSize, lineHeight: fontSize * 1.18 };
     }
   }
   const fontSize = sizes[sizes.length - 1];
   const lines = wrap(title, charsFor(r, fontSize, em));
   const cut = lines.slice(0, maxLines);
   if (lines.length > maxLines) cut[maxLines - 1] = cut[maxLines - 1].replace(/-?$/, '\u2026');
-  return withHint({ lines: cut, fontSize, lineHeight: fontSize * 1.18 });
+  return { lines: cut, fontSize, lineHeight: fontSize * 1.18 };
 }
 
 const NODE_SIZES = [14, 13, 12, 11, 10];
@@ -210,8 +189,7 @@ export function layoutWeb(input: LayoutInput, minFont = 0, aspect = 1.1): WebLay
   const r = R_NODE;
   const center: PlacedNode = {
     id: 'center', title: input.centerTitle, x: 0, y: 0, r: R_CENTER,
-    // Room below the title for the small "TAP TO STUDY" line.
-    label: fitLabel(input.centerTitle, R_CENTER, atLeast(CENTER_SIZES, minFont), 3, 0.64, HINT_ROOM),
+    label: fitLabel(input.centerTitle, R_CENTER, atLeast(CENTER_SIZES, minFont), 3, 0.64),
   };
 
   const items = [

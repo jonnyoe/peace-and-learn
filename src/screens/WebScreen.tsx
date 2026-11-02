@@ -192,7 +192,6 @@ function WebScreenFor({ webKey, onOpen, onHome }: Props) {
             centerTitle={web.center?.title ?? web.title}
             nodes={web.nodes}
             edges={web.edges}
-            centerHint={studying ? 'STUDYING' : 'TAP TO STUDY'}
             onPressCenter={studying ? undefined : startStudy}
             onPressNode={pressNode}
             ringId={ringId}
