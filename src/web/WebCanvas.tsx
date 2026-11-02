@@ -1,13 +1,15 @@
-import React, { useMemo, useState } from 'react';
-import { View, Pressable, StyleSheet, LayoutChangeEvent } from 'react-native';
-import Svg, { Circle, G, Line, Text as SvgText } from 'react-native-svg';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { View, Pressable, StyleSheet, LayoutChangeEvent, Animated, Easing, AccessibilityInfo } from 'react-native';
+import Svg, { Circle, G, Line, Path, Text as SvgText } from 'react-native-svg';
 import { layoutWeb, PlacedNode } from './layout';
+import { DASH, LaceLayer, motifFor, motifLayers, MotifPattern } from './motifs';
 import { color, font } from '../theme';
 
 // Draws one web: centre bubble, neighbours and straight strands (spec
 // section 4a), with the derived visuals of sections 3 and 5: faded
-// bubbles, lace layers, satellites and strand beads. The lace here is a
-// plain stand-in (rings and dots); the motif library replaces it in step 7.
+// bubbles, lace layers drawn from each bubble's motif (motifs.ts),
+// satellites and strand beads. When a bubble's lace gains a layer, the new
+// layer fades in.
 // The drawing is laid out in natural units and scaled to fit the space it
 // gets, so the same code draws the full web and the small one in study mode.
 
@@ -18,10 +20,26 @@ export type Look = {
   lace: number;                    // 0 to 5
   faded: boolean;
   satellites: (number | null)[];   // recall of each bubble in its nested web
+  pattern?: MotifPattern | null;   // lace motif; missing: one picked from the id
 };
 
 const INK_W = 1.1;     // lace line width (spec section 6)
 const BEADS_FROM = 3;  // both ends need this lace level for strand beads
+const GROW_MS = 1200;  // fade-in of a new lace layer (spec 4b: about 1 to 1.5 s)
+
+const AnimatedG = Animated.createAnimatedComponent(G);
+
+// Reduce Motion on: new layers appear at once instead of fading in.
+function useReduceMotion(): boolean {
+  const [on, setOn] = useState(false);
+  useEffect(() => {
+    let live = true;
+    AccessibilityInfo.isReduceMotionEnabled().then(v => { if (live) setOn(v); });
+    const sub = AccessibilityInfo.addEventListener('reduceMotionChanged', setOn);
+    return () => { live = false; sub.remove(); };
+  }, []);
+  return on;
+}
 
 export default function WebCanvas({ centerTitle, nodes, edges, onPressCenter, onPressNode, centerHint, ringId, looks }: {
   centerTitle: string;
@@ -36,6 +54,7 @@ export default function WebCanvas({ centerTitle, nodes, edges, onPressCenter, on
   looks?: Record<string, Look>; // by node id; 'center' for the centre
 }) {
   const [area, setArea] = useState({ w: 0, h: 0 });
+  const still = useReduceMotion();
   const web = useMemo(() => layoutWeb({ centerTitle, nodes, edges }), [centerTitle, nodes, edges]);
 
   const onLayout = (e: LayoutChangeEvent) => {
@@ -73,8 +92,8 @@ export default function WebCanvas({ centerTitle, nodes, edges, onPressCenter, on
                 />
               );
             })}
-            {web.nodes.map(n => <Bubble key={n.id} node={n} look={lookOf(n.id)} />)}
-            <Bubble node={web.center} center hint={centerHint} look={lookOf('center')} />
+            {web.nodes.map(n => <Bubble key={n.id} node={n} look={lookOf(n.id)} still={still} />)}
+            <Bubble node={web.center} center hint={centerHint} look={lookOf('center')} still={still} />
             {ringed && (
               <Circle cx={ringed.x} cy={ringed.y} r={ringed.r + 9} fill="none" stroke={color.ink} strokeWidth={2} strokeDasharray="5 4" />
             )}
@@ -138,36 +157,58 @@ function Strand({ a, b, faded, beads }: { a: PlacedNode; b: PlacedNode; faded: b
   );
 }
 
-// Stand-in lace: one ring per layer, outward from the bubble edge. Dotted
-// rings are drawn as round-capped dashes of almost zero length.
-const LAYERS: { gap: number; dots?: number; dash?: string }[] = [
-  { gap: 6, dots: 5.5 },        // 1: fine dot ring
-  { gap: 12 },                  // 2: thin ring
-  { gap: 18, dots: 7.5 },       // 3: wider dot ring
-  { gap: 25, dash: '7 4' },     // 4: dashed ring
-  { gap: 32 },                  // 5: outer ring...
-];
-
-function Lace({ x, y, r, level, faded }: { x: number; y: number; r: number; level: number; faded: boolean }) {
+// The bubble's lace: the first "level" layers of its motif, centred on the
+// bubble. Layers it already had are drawn plainly. When the level goes up
+// (a rating in study mode), the new layers fade in over GROW_MS; the
+// pattern is never drawn at the new level before the fade starts, so it
+// doesn't flash. A first draw (opening a web) shows everything at once.
+function Lace({ id, x, y, r, level, faded, pattern, still }: {
+  id: string; x: number; y: number; r: number; level: number; faded: boolean;
+  pattern?: MotifPattern | null; still: boolean;
+}) {
+  const layers = motifLayers(motifFor(pattern, id), r, pattern?.params);
   const ink = faded ? color.fadedLine : color.ink;
+  // Layers below "settled" are drawn plainly; the rest up to level fade in.
+  const [settled, setSettled] = useState(level);
+  const opacity = useRef(new Animated.Value(0)).current;
+  const latest = useRef(level);
+  latest.current = level;
+
+  useEffect(() => {
+    if (level <= settled || still) {
+      if (level !== settled) setSettled(level);
+      return;
+    }
+    // A second rise during a fade carries on from the current opacity.
+    Animated.timing(opacity, {
+      toValue: 1, duration: GROW_MS, easing: Easing.out(Easing.quad), useNativeDriver: false,
+    }).start(({ finished }) => { if (finished) setSettled(latest.current); });
+  }, [level, settled, still, opacity]);
+
+  // Ready for the next rise, once the fading layers have moved to the plain group.
+  useEffect(() => { opacity.setValue(0); }, [settled, opacity]);
+  useEffect(() => () => opacity.stopAnimation(), [opacity]);
+
+  const plain = Math.min(settled, level);
   return (
-    <G>
-      {LAYERS.slice(0, level).map((l, i) => (
-        <Circle
-          key={i}
-          cx={x} cy={y} r={r + l.gap}
-          fill="none"
-          stroke={ink}
-          strokeWidth={l.dots ? 2.2 : INK_W}
-          strokeLinecap={l.dots ? 'round' : 'butt'}
-          strokeDasharray={l.dots ? '0.01 ' + l.dots : l.dash}
-        />
-      ))}
-      {/* ...with a dot ring just outside it */}
-      {level >= 5 && (
-        <Circle cx={x} cy={y} r={r + 36} fill="none" stroke={ink} strokeWidth={1.8} strokeLinecap="round" strokeDasharray="0.01 9" />
+    <G transform={'translate(' + x + ' ' + y + ')'}>
+      {layers.slice(0, plain).map((l, i) => <LaceLayerPaths key={i} layer={l} ink={ink} />)}
+      {level > plain && (
+        <AnimatedG opacity={opacity}>
+          {layers.slice(plain, level).map((l, i) => <LaceLayerPaths key={plain + i} layer={l} ink={ink} />)}
+        </AnimatedG>
       )}
     </G>
+  );
+}
+
+function LaceLayerPaths({ layer, ink }: { layer: LaceLayer; ink: string }) {
+  return (
+    <>
+      {!!layer.line && <Path d={layer.line} fill="none" stroke={ink} strokeWidth={INK_W} strokeLinejoin="round" strokeLinecap="round" />}
+      {!!layer.dashed && <Path d={layer.dashed} fill="none" stroke={ink} strokeWidth={INK_W} strokeDasharray={DASH} />}
+      {!!layer.fill && <Path d={layer.fill} fill={ink} />}
+    </>
   );
 }
 
@@ -208,7 +249,7 @@ function Satellites({ node, recalls }: { node: PlacedNode; recalls: (number | nu
   );
 }
 
-function Bubble({ node, center, hint, look }: { node: PlacedNode; center?: boolean; hint?: string; look?: Look }) {
+function Bubble({ node, center, hint, look, still }: { node: PlacedNode; center?: boolean; hint?: string; look?: Look; still: boolean }) {
   const { x, y, r, label } = node;
   const faded = !!look?.faded;
   // A faded centre turns grey instead of dashed, so its white text stays readable.
@@ -221,7 +262,7 @@ function Bubble({ node, center, hint, look }: { node: PlacedNode; center?: boole
   const firstBaseline = y - blockH / 2 + label.lineHeight * 0.78;
   return (
     <G>
-      <Lace x={x} y={y} r={r} level={look?.lace ?? 0} faded={faded} />
+      <Lace id={node.id} x={x} y={y} r={r} level={look?.lace ?? 0} faded={faded} pattern={look?.pattern} still={still} />
       {!center && <Satellites node={node} recalls={look?.satellites ?? []} />}
       <Circle
         cx={x} cy={y} r={r}

@@ -475,7 +475,7 @@ export function getStudyCards(key: WebKey): WebStudyCard[] {
 // How each bubble of a web looks (spec sections 3 and 5): faded or not, lace
 // level, and one satellite per bubble in its nested web, carrying that inner
 // bubble's recall (null = no reviewed cards yet).
-export type NodeLook = BubbleStats & { satellites: (number | null)[] };
+export type NodeLook = BubbleStats & { satellites: (number | null)[]; pattern: Pattern | null };
 
 export function getWebLooks(web: WebView, now = new Date()): Record<string, NodeLook> {
   const ids = [web.center, ...web.nodes].filter((n): n is WebNode => !!n).map(n => n.id);
@@ -491,7 +491,8 @@ export function getWebLooks(web: WebView, now = new Date()): Record<string, Node
   const stats = (id: string) => bubbleStats(cards[id] ?? [], now);
 
   const looks: Record<string, NodeLook> = {};
-  for (const id of ids) looks[id] = { ...stats(id), satellites: [] };
+  const patterns = new Map([web.center, ...web.nodes].filter((n): n is WebNode => !!n).map(n => [n.id, n.pattern]));
+  for (const id of ids) looks[id] = { ...stats(id), satellites: [], pattern: patterns.get(id) ?? null };
   // The centre's nested web is the web on screen, so it gets no satellites.
   const centerId = web.center?.id;
   for (const c of children) {
