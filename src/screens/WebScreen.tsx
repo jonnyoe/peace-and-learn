@@ -16,6 +16,7 @@ import { color, font, size } from '../theme';
 // goes away, the web shrinks to the top and a flashcard appears below it.
 
 const STUDY_SCALE = 0.6;
+const END_GUARD_MS = 500; // taps on the web this soon after starting don't end the session
 
 type Props = {
   webKey: WebKey;
@@ -62,6 +63,7 @@ function WebScreenFor({ webKey, onOpen, onHome }: Props) {
   const [shrunk, setShrunk] = useState(false);
   const t = useRef(new Animated.Value(0)).current;
   const animGen = useRef(0);
+  const startedAt = useRef(0);
   const mounted = useRef(true);
   // Leaving the web (breadcrumb, Subjects, another tab) unmounts this screen,
   // which drops the session with it. Stop any running animation too.
@@ -106,6 +108,7 @@ function WebScreenFor({ webKey, onOpen, onHome }: Props) {
   }
 
   function startStudy() {
+    startedAt.current = Date.now();
     if (!full || session.phase !== 'off') return;
     session.start();
     setShrunk(true);
@@ -117,8 +120,12 @@ function WebScreenFor({ webKey, onOpen, onHome }: Props) {
     animate(0, () => setShrunk(false));
   }
 
-  // Nothing rated yet: just go back. Otherwise show what grew.
+  // Nothing rated yet: just go back. Otherwise show what grew. Also works
+  // while a new lace layer is fading in (the session cancels that wait).
+  // Ignored right after the session starts, so the second tap of a double
+  // tap on the centre doesn't end it at once.
   function endSession() {
+    if (Date.now() - startedAt.current < END_GUARD_MS) return;
     if (session.reviewed === 0) backToWeb(); else session.end();
   }
 
@@ -156,20 +163,9 @@ function WebScreenFor({ webKey, onOpen, onHome }: Props) {
     <KeyboardAvoidingView style={st.wrap} behavior={Platform.OS === 'ios' ? 'padding' : undefined} {...swipe.panHandlers}>
       {studying ? (
         // Compact header while studying: one short line, so the shrunken web
-        // and the card get the room. End session is the way out.
+        // and the card get the room. Tapping the web ends the session.
         <View style={st.bar}>
           <Text style={[st.barTitle, st.titleText]} numberOfLines={1}>{web.title}</Text>
-          {session.phase === 'card' && (
-            <Pressable
-              onPress={endSession}
-              accessibilityRole="button"
-              accessibilityLabel="End session"
-              hitSlop={{ top: 8, bottom: 8, left: 16, right: 12 }}
-              style={st.barEnd}
-            >
-              {({ pressed }) => <Text style={[st.barEndText, pressed && st.barEndPressed]}>End</Text>}
-            </Pressable>
-          )}
         </View>
       ) : (
       <View style={st.header}>
@@ -198,6 +194,17 @@ function WebScreenFor({ webKey, onOpen, onHome }: Props) {
             looks={looks}
           />
         </Animated.View>
+        {/* Study mode: the whole shrunken web is one button that ends the
+            session. It sits over the web only, not the card below. */}
+        {session.phase === 'card' && (
+          <Pressable
+            onPress={endSession}
+            accessibilityRole="button"
+            accessibilityLabel="End session"
+            accessibilityHint="Shows what grew, or goes back to the web"
+            style={StyleSheet.absoluteFill}
+          />
+        )}
       </Animated.View>
 
       {session.phase === 'card' && session.card && (
@@ -252,13 +259,9 @@ const st = StyleSheet.create({
   crumb: { minHeight: 44, justifyContent: 'center' },
   crumbText: { fontFamily: font.ui, fontSize: size.small, color: color.faint },
   sep: { fontFamily: font.ui, fontSize: size.small, color: color.faint, marginHorizontal: 6 },
-  // Study mode: a thin bar instead of a heading. "End" is plain text; its
-  // hitSlop keeps the touch area at 44 pt.
+  // Study mode: a thin bar instead of a heading.
   bar: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: size.pad, paddingTop: 2, minHeight: 30 },
   barTitle: { fontFamily: font.readingSemi, fontSize: 16, lineHeight: 22, color: color.ink },
-  barEnd: { minHeight: 28, justifyContent: 'center' },
-  barEndText: { fontFamily: font.uiMedium, fontSize: 16, color: color.ink, textDecorationLine: 'underline' },
-  barEndPressed: { color: color.faint },
   titleText: { flex: 1 },
   title: { fontFamily: font.readingBold, fontSize: 32, lineHeight: 40, color: color.ink },
   canvasBox: { marginTop: 4, marginBottom: 8 },
