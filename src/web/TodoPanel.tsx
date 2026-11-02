@@ -13,11 +13,12 @@ import { Pill } from '../ui';
 
 export type LinkChoice = { id: string; title: string };
 
-export default function TodoPanel({ webKey, webTitle, bubbles, defaultLinkId }: {
+export default function TodoPanel({ webKey, webTitle, bubbles, defaultLinkId, bottomInset = 0 }: {
   webKey: WebKey;
   webTitle: string;
   bubbles: LinkChoice[];        // what a new to-do can be linked to: centre first
   defaultLinkId: string | null; // preselected link for a new to-do
+  bottomInset?: number;         // home indicator height: the panel's paper reaches under it
 }) {
   const [, setVersion] = useState(0);
   const refresh = () => setVersion(v => v + 1);
@@ -39,7 +40,7 @@ export default function TodoPanel({ webKey, webTitle, bubbles, defaultLinkId }: 
   }
 
   return (
-    <View style={st.panel}>
+    <View style={[st.panel, { paddingBottom: 6 + bottomInset }]}>
       <View style={st.head}>
         <Text style={st.heading} numberOfLines={1} accessibilityRole="header">
           {'TO-DOS \u00b7 ' + webTitle.toUpperCase()}

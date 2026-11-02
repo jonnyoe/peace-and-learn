@@ -1,7 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   View, Text, Pressable, StyleSheet, KeyboardAvoidingView, Platform, Animated, Easing, LayoutChangeEvent,
+  PanResponder,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getWeb, getWebLooks, WebKey } from '../db';
 import WebCanvas from '../web/WebCanvas';
 import TodoPanel from '../web/TodoPanel';
@@ -19,25 +21,39 @@ type Props = {
   webKey: WebKey;
   onOpen: (key: WebKey) => void;
   onHome: () => void;
-  // Told when a study session starts and ends (also false when the screen
-  // goes away), so the app can hide its tab bar during study.
-  onStudyingChange?: (studying: boolean) => void;
 };
+
+// Swipe from the left edge to go back one level (iOS style).
+const EDGE = 28;        // the swipe must start this close to the left edge
+const SWIPE_BACK = 70;  // and travel at least this far right
 
 // A fresh screen (and study session) for every web.
 export default function WebScreen(props: Props) {
   return <WebScreenFor key={props.webKey.domain + '/' + (props.webKey.parentId ?? '')} {...props} />;
 }
 
-function WebScreenFor({ webKey, onOpen, onHome, onStudyingChange }: Props) {
+function WebScreenFor({ webKey, onOpen, onHome }: Props) {
   const web = getWeb(webKey);
   const session = useStudySession(webKey);
   const studying = session.phase !== 'off';
+  const insets = useSafeAreaInsets();
 
-  const notify = useRef(onStudyingChange);
-  notify.current = onStudyingChange;
-  useEffect(() => { notify.current?.(studying); }, [studying]);
-  useEffect(() => () => notify.current?.(false), []);
+  // One level up: the parent web, or Subjects from a top-level web. Read
+  // through a ref so the pan responder (created once) sees the latest.
+  const up = useRef<() => void>(() => {});
+  up.current = () => {
+    if (studying || !web) return; // no swipe-back mid-session; End is the way out
+    const parent = web.breadcrumb[web.breadcrumb.length - 1];
+    if (parent) onOpen(parent.key); else onHome();
+  };
+  // Capture phase, so it wins over the web and lists, but only for a mostly
+  // horizontal drag that starts at the left edge. Taps are never captured.
+  const swipe = useRef(PanResponder.create({
+    onMoveShouldSetPanResponderCapture: (_, g) =>
+      g.x0 < EDGE && g.dx > 12 && Math.abs(g.dy) < Math.abs(g.dx) * 0.6,
+    onPanResponderRelease: (_, g) => { if (g.dx > SWIPE_BACK || g.vx > 0.5) up.current(); },
+    onPanResponderTerminationRequest: () => false,
+  })).current;
 
   // Size of the full web, measured before study starts. While studying (and
   // while growing back) the web is drawn at that size and scaled down, so
@@ -137,7 +153,7 @@ function WebScreenFor({ webKey, onOpen, onHome, onStudyingChange }: Props) {
     : st.grow;
 
   return (
-    <KeyboardAvoidingView style={st.wrap} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+    <KeyboardAvoidingView style={st.wrap} behavior={Platform.OS === 'ios' ? 'padding' : undefined} {...swipe.panHandlers}>
       {studying ? (
         // Compact header while studying: one short line, so the shrunken web
         // and the card get the room. End session is the way out.
@@ -158,7 +174,7 @@ function WebScreenFor({ webKey, onOpen, onHome, onStudyingChange }: Props) {
       ) : (
       <View style={st.header}>
         <View style={st.crumbs}>
-          <Crumb label={web.category ?? 'Subjects'} onPress={onHome} first />
+          <Crumb label="Subjects" onPress={onHome} first />
           {web.breadcrumb.map(b => (
             <React.Fragment key={b.key.parentId ?? 'top'}>
               <Text style={st.sep}>›</Text>
@@ -199,6 +215,8 @@ function WebScreenFor({ webKey, onOpen, onHome, onStudyingChange }: Props) {
       {session.phase === 'summary' && (
         <SessionSummary reviewed={session.reviewed} grew={session.grew} empty={session.empty} onBack={backToWeb} />
       )}
+      {/* Keeps the rating buttons clear of the home indicator. */}
+      {studying && <View style={{ height: insets.bottom }} />}
 
       {!studying && (
         <>
@@ -212,6 +230,7 @@ function WebScreenFor({ webKey, onOpen, onHome, onStudyingChange }: Props) {
             webTitle={web.title}
             bubbles={linkChoices}
             defaultLinkId={web.center?.id ?? null}
+            bottomInset={insets.bottom}
           />
         </>
       )}

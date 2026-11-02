@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
-import { getSetting, initDb, setSetting, WebKey } from './src/db';
+import { getWeb, initDb, WebKey } from './src/db';
 import HomeScreen from './src/screens/HomeScreen';
 import WebScreen from './src/screens/WebScreen';
 import ReviewScreen from './src/screens/ReviewScreen';
@@ -22,45 +22,48 @@ const TABS: { key: Tab; label: string }[] = [
   { key: 'model', label: 'Model' },
 ];
 
-// Where the Webs tab is: null is the home screen (all subjects), otherwise
-// one web. Remembered between launches.
-function loadPlace(): WebKey | null {
-  try { return JSON.parse(getSetting('web_place') ?? 'null'); } catch { return null; }
-}
+// Where the Webs tab is: null is the Subjects home screen, otherwise one web.
+// Not remembered between launches: the app always opens on Subjects.
 
 export default function App() {
   const fontsReady = useThemeFonts();
   const [tab, setTab] = useState<Tab>('web');
-  const [place, setPlaceState] = useState<WebKey | null>(loadPlace);
-  // The tab bar hides during a study session to give the card the room.
-  const [studying, setStudying] = useState(false);
+  const [place, setPlace] = useState<WebKey | null>(null);
 
-  function setPlace(p: WebKey | null) {
-    setSetting('web_place', JSON.stringify(p));
-    setPlaceState(p);
+  // Inside a web (browsing or studying) the tab bar is hidden and the
+  // breadcrumb is the way out. A web that no longer exists (sample removed,
+  // subject deleted) counts as Subjects, so the tab bar can't get stuck hidden.
+  const web = tab === 'web' && place ? getWeb(place) : null;
+  const inWeb = !!web;
+
+  function openTab(t: Tab) {
+    if (t === 'web') setPlace(null); // the Webs tab always opens on Subjects
+    setTab(t);
   }
 
   if (!fontsReady) return <View style={st.root} />;
 
   return (
     <SafeAreaProvider>
-      <SafeAreaView style={st.root} edges={['top', 'bottom']}>
+      {/* Inside a web the screen handles the bottom inset itself, so its
+          to-do panel or card can reach down behind the home indicator. */}
+      <SafeAreaView style={st.root} edges={inWeb ? ['top'] : ['top', 'bottom']}>
         <StatusBar style="dark" />
         {/* Screens remount on tab change, so Review always reflects new cards. */}
         <View style={st.body}>
-          {tab === 'web' && (place
-            ? <WebScreen webKey={place} onOpen={setPlace} onHome={() => setPlace(null)} onStudyingChange={setStudying} />
+          {tab === 'web' && (inWeb && place
+            ? <WebScreen webKey={place} onOpen={setPlace} onHome={() => setPlace(null)} />
             : <HomeScreen onOpen={setPlace} />)}
           {tab === 'review' && <ReviewScreen onGoImport={() => setTab('add')} />}
           {tab === 'add' && <ImportScreen onSaved={() => setTab('map')} />}
           {tab === 'map' && <MapScreen />}
           {tab === 'model' && <ModelScreen />}
         </View>
-        {!(studying && tab === 'web') && <View style={st.tabs}>
+        {!inWeb && <View style={st.tabs}>
           {TABS.map(t => {
             const active = tab === t.key;
             return (
-              <Pressable key={t.key} onPress={() => setTab(t.key)} style={[st.tab, active && st.tabActive]} accessibilityRole="tab">
+              <Pressable key={t.key} onPress={() => openTab(t.key)} style={[st.tab, active && st.tabActive]} accessibilityRole="tab">
                 <Text style={[st.tabText, active && st.tabTextActive]}>{t.label}</Text>
               </Pressable>
             );
