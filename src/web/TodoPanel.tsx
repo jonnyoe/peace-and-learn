@@ -3,6 +3,7 @@ import { View, Text, TextInput, Pressable, ScrollView, Alert, StyleSheet } from 
 import Svg, { Path } from 'react-native-svg';
 import { addTodo, deleteTodo, getTodos, setTodoDone, Todo, WebKey } from '../db';
 import { color, font, size } from '../theme';
+import { Pill } from '../ui';
 
 // The to-do panel along the bottom of a web (spec section 4a): "To-dos ·
 // <web title>", a "+ Add" button and checkable items, each showing the
@@ -143,28 +144,6 @@ function AddForm({ bubbles, defaultLinkId, onSave, onCancel }: {
   );
 }
 
-// Rounded outline button as in the mockup. Pressed or selected is a hard
-// invert (no opacity fades, which ghost on e-ink).
-function Pill({ label, onPress, selected, disabled, accessibilityLabel }: {
-  label: string; onPress: () => void; selected?: boolean; disabled?: boolean; accessibilityLabel?: string;
-}) {
-  const isDark = (pressed: boolean) => !disabled && (selected ? !pressed : pressed);
-  return (
-    <Pressable
-      onPress={onPress}
-      disabled={disabled}
-      accessibilityRole="button"
-      accessibilityLabel={accessibilityLabel ?? label}
-      accessibilityState={{ selected: !!selected, disabled: !!disabled }}
-      style={({ pressed }) => [st.pill, isDark(pressed) && st.pillDark, disabled && st.pillDisabled]}
-    >
-      {({ pressed }) => (
-        <Text style={[st.pillText, isDark(pressed) && st.pillTextDark, disabled && st.pillTextDisabled]}>{label}</Text>
-      )}
-    </Pressable>
-  );
-}
-
 const st = StyleSheet.create({
   panel: {
     backgroundColor: color.panel,
@@ -199,13 +178,4 @@ const st = StyleSheet.create({
   formLabel: { fontFamily: font.uiMedium, fontSize: 13, letterSpacing: 1.4, color: color.faint },
   chips: { gap: 8, paddingRight: 8 },
   formButtons: { flexDirection: 'row', justifyContent: 'flex-end', gap: 10 },
-  pill: {
-    minHeight: 44, paddingHorizontal: 18, borderRadius: 22, borderWidth: 1.5, borderColor: color.ink,
-    alignItems: 'center', justifyContent: 'center', backgroundColor: color.panel,
-  },
-  pillDark: { backgroundColor: color.ink },
-  pillDisabled: { borderColor: color.fadedLine },
-  pillText: { fontFamily: font.ui, fontSize: 16, color: color.ink },
-  pillTextDark: { color: color.panel },
-  pillTextDisabled: { color: color.fadedLine },
 });

@@ -51,3 +51,37 @@ export const s = StyleSheet.create({
     backgroundColor: color.panel,
   },
 });
+
+// Rounded outline button as in the mockup. Pressed or selected is a hard
+// invert (no opacity fades, which ghost on e-ink).
+export function Pill({ label, onPress, selected, disabled, accessibilityLabel }: {
+  label: string; onPress: () => void; selected?: boolean; disabled?: boolean; accessibilityLabel?: string;
+}) {
+  const isDark = (pressed: boolean) => !disabled && (selected ? !pressed : pressed);
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={disabled}
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel ?? label}
+      accessibilityState={{ selected: !!selected, disabled: !!disabled }}
+      style={({ pressed }) => [pill.pill, isDark(pressed) && pill.pillDark, disabled && pill.pillDisabled]}
+    >
+      {({ pressed }) => (
+        <Text style={[pill.pillText, isDark(pressed) && pill.pillTextDark, disabled && pill.pillTextDisabled]}>{label}</Text>
+      )}
+    </Pressable>
+  );
+}
+
+const pill = StyleSheet.create({
+  pill: {
+    minHeight: 44, paddingHorizontal: 18, borderRadius: 22, borderWidth: 1.5, borderColor: color.ink,
+    alignItems: 'center', justifyContent: 'center', backgroundColor: color.panel,
+  },
+  pillDark: { backgroundColor: color.ink },
+  pillDisabled: { borderColor: color.fadedLine },
+  pillText: { fontFamily: font.ui, fontSize: 16, color: color.ink },
+  pillTextDark: { color: color.panel },
+  pillTextDisabled: { color: color.fadedLine },
+});

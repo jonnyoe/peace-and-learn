@@ -11,13 +11,16 @@ import { color, font } from '../theme';
 
 export type CanvasNode = { id: string; title: string };
 
-export default function WebCanvas({ centerTitle, nodes, edges, onPressCenter, onPressNode, centerHint }: {
+export default function WebCanvas({ centerTitle, nodes, edges, onPressCenter, onPressNode, centerHint, ringId }: {
   centerTitle: string;
   nodes: CanvasNode[];
   edges: { from_id: string; to_id: string }[];
   onPressCenter?: () => void;
   onPressNode?: (id: string, hiddenIds?: string[]) => void;
   centerHint?: string; // small caps line under the centre title, e.g. "TAP TO STUDY"
+  // Study mode: draw a dashed ring around this bubble ('center' for the
+  // centre). A bubble folded into "+N more" rings that bubble instead.
+  ringId?: string | null;
 }) {
   const [area, setArea] = useState({ w: 0, h: 0 });
   const web = useMemo(() => layoutWeb({ centerTitle, nodes, edges }), [centerTitle, nodes, edges]);
@@ -26,6 +29,9 @@ export default function WebCanvas({ centerTitle, nodes, edges, onPressCenter, on
     const { width, height } = e.nativeEvent.layout;
     if (width !== area.w || height !== area.h) setArea({ w: width, h: height });
   };
+
+  const ringed = !ringId ? null : ringId === 'center' ? web.center
+    : web.nodes.find(n => n.id === ringId || n.hiddenIds?.includes(ringId)) ?? null;
 
   const { box } = web;
   const scale = area.w && area.h ? Math.min(area.w / box.w, area.h / box.h) : 0;
@@ -45,6 +51,9 @@ export default function WebCanvas({ centerTitle, nodes, edges, onPressCenter, on
             ))}
             {web.nodes.map(n => <Bubble key={n.id} node={n} />)}
             <Bubble node={web.center} center hint={centerHint} />
+            {ringed && (
+              <Circle cx={ringed.x} cy={ringed.y} r={ringed.r + 9} fill="none" stroke={color.ink} strokeWidth={2} strokeDasharray="5 4" />
+            )}
           </Svg>
 
           {/* Touch targets on top of the drawing: plain views are more reliable

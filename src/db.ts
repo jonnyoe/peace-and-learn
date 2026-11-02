@@ -441,6 +441,41 @@ export function getTodos(key: WebKey): Todo[] {
     key.domain, key.parentId, ...visible).map(t => ({ ...t, done: !!t.done }));
 }
 
+// ---------- Study mode ----------
+// A card in a web's study session. anchor_id is the bubble shown in that
+// web which contains the card: the card's own bubble, or the bubble whose
+// nested web it lives in (null if there is none).
+export type WebStudyCard = StudyCard & { anchor_id: string | null };
+
+/** Every card in a web and in all the webs nested inside it. */
+export function getStudyCards(key: WebKey): WebStudyCard[] {
+  const web = getWeb(key);
+  if (!web) return [];
+  const cols = 'SELECT cards.*, concepts.domain AS domain, concepts.title AS concept_title ' +
+    'FROM cards JOIN concepts ON concepts.id = cards.concept_id ';
+  const rows = key.parentId
+    ? db.getAllSync<any>(
+      'WITH RECURSIVE sub(id) AS (SELECT ? UNION SELECT c.id FROM concepts c JOIN sub ON c.parent_id = sub.id) ' +
+      cols + 'WHERE concepts.id IN (SELECT id FROM sub) ORDER BY concepts.created_at, cards.id', key.parentId)
+    : db.getAllSync<any>(cols + 'WHERE concepts.domain = ? ORDER BY concepts.created_at, cards.id', key.domain);
+
+  const visible = new Set([web.center?.id, ...web.nodes.map(n => n.id)].filter((x): x is string => !!x));
+  const parentOf = new Map(db.getAllSync<{ id: string; parent_id: string | null }>(
+    'SELECT id, parent_id FROM concepts WHERE domain = ?', key.domain).map(r => [r.id, r.parent_id]));
+  const anchor = (id: string): string | null => {
+    let x: string | null = id;
+    for (let guard = 0; x && !visible.has(x) && guard < 64; guard++) x = parentOf.get(x) ?? null;
+    return x && visible.has(x) ? x : null;
+  };
+  return rows.map(r => ({ ...r, fsrs: fromJson(r.fsrs), anchor_id: anchor(r.concept_id) }));
+}
+
+/** FSRS state of every card in one bubble, for its lace level. */
+export function getConceptCards(conceptId: string): FsrsCard[] {
+  return db.getAllSync<{ fsrs: string }>('SELECT fsrs FROM cards WHERE concept_id = ?', conceptId)
+    .map(r => fromJson(r.fsrs));
+}
+
 export function addTodo(key: WebKey, text: string, conceptId: string | null = null): string {
   const id = newId();
   db.runSync('INSERT INTO todos (id, domain, web_id, concept_id, text, done, created_at) VALUES (?, ?, ?, ?, ?, 0, ?)',
