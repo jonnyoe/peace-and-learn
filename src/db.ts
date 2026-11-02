@@ -121,6 +121,11 @@ function migrate() {
   if (!concepts.includes('pattern')) {
     db.execSync('ALTER TABLE concepts ADD COLUMN pattern TEXT');
   }
+  // Highest lace level the bubble has reached. Layers once earned stay drawn
+  // even if a lapse lowers stability; only their ink fades (see WebCanvas).
+  if (!concepts.includes('lace_peak')) {
+    db.execSync('ALTER TABLE concepts ADD COLUMN lace_peak INTEGER NOT NULL DEFAULT 0');
+  }
 
   const domains = columns('domains');
   if (!domains.includes('title')) db.execSync('ALTER TABLE domains ADD COLUMN title TEXT');
@@ -285,9 +290,18 @@ export function resetAllProgress(now = new Date()): number {
 }
 
 export function saveReview(cardId: string, next: FsrsCard, rating: number) {
+  const conceptId = db.getFirstSync<{ concept_id: string }>('SELECT concept_id FROM cards WHERE id = ?', cardId)?.concept_id;
+  const now = new Date();
   db.withTransactionSync(() => {
+    // The bubble's lace before this review counts as earned, so a Hard or
+    // Forgot that lowers stability never takes layers away.
+    const before = conceptId ? bubbleStats(getConceptCards(conceptId), now).lace : 0;
     db.runSync('UPDATE cards SET fsrs = ?, due = ? WHERE id = ?', toJson(next), next.due.getTime(), cardId);
     db.runSync('INSERT INTO reviews (card_id, rating, reviewed_at) VALUES (?, ?, ?)', cardId, rating, Date.now());
+    if (conceptId) {
+      const after = bubbleStats(getConceptCards(conceptId), now).lace;
+      db.runSync('UPDATE concepts SET lace_peak = MAX(lace_peak, ?, ?) WHERE id = ?', before, after, conceptId);
+    }
   });
 }
 
@@ -474,7 +488,8 @@ export function getStudyCards(key: WebKey): WebStudyCard[] {
 // ---------- Derived visuals ----------
 // How each bubble of a web looks (spec sections 3 and 5): faded or not, lace
 // level, and one satellite per bubble in its nested web, carrying that inner
-// bubble's recall (null = no reviewed cards yet).
+// bubble's recall (null = no reviewed cards yet). lace is the earned level:
+// the highest reached (lace_peak) or the current one, whichever is more.
 export type NodeLook = BubbleStats & { satellites: (number | null)[]; pattern: Pattern | null };
 
 export function getWebLooks(web: WebView, now = new Date()): Record<string, NodeLook> {
@@ -492,13 +507,31 @@ export function getWebLooks(web: WebView, now = new Date()): Record<string, Node
 
   const looks: Record<string, NodeLook> = {};
   const patterns = new Map([web.center, ...web.nodes].filter((n): n is WebNode => !!n).map(n => [n.id, n.pattern]));
-  for (const id of ids) looks[id] = { ...stats(id), satellites: [], pattern: patterns.get(id) ?? null };
+  const peaks = lacePeaks(ids);
+  for (const id of ids) {
+    const s = stats(id);
+    looks[id] = { ...s, lace: Math.max(s.lace, peaks[id] ?? 0), satellites: [], pattern: patterns.get(id) ?? null };
+  }
   // The centre's nested web is the web on screen, so it gets no satellites.
   const centerId = web.center?.id;
   for (const c of children) {
     if (c.parent_id !== centerId) looks[c.parent_id].satellites.push(stats(c.id).recall);
   }
   return looks;
+}
+
+function lacePeaks(ids: string[]): Record<string, number> {
+  const peaks: Record<string, number> = {};
+  if (!ids.length) return peaks;
+  db.getAllSync<{ id: string; lace_peak: number }>(
+    'SELECT id, lace_peak FROM concepts WHERE id IN (' + placeholders(ids.length) + ')', ...ids)
+    .forEach(r => (peaks[r.id] = r.lace_peak ?? 0));
+  return peaks;
+}
+
+/** Lace layers drawn for a bubble: the highest it has reached, or more if it has grown since. */
+export function bubbleLace(conceptId: string, now = new Date()): number {
+  return Math.max(bubbleStats(getConceptCards(conceptId), now).lace, lacePeaks([conceptId])[conceptId] ?? 0);
 }
 
 /** FSRS state of every card in one bubble, for its lace level. */

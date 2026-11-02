@@ -6,6 +6,10 @@ export const R_NODE = 38;
 export const R_CENTER = 46;
 export const LACE = 42;      // room kept around each bubble for its pattern
 export const MAX_SHOWN = 8;  // more than this and the rest fold into "+N more"
+// How far a full pattern (lace or satellites) actually reaches beyond a
+// bubble's edge, and the clear space kept between two patterns.
+export const PATTERN_REACH = 40;
+export const PATTERN_GAP = 4;
 
 // Distance from the centre to a neighbour, as a half-width and half-height.
 // Neighbours sit on a rounded rectangle rather than a circle, which uses a
@@ -122,11 +126,14 @@ const CENTER_SIZES = [20, 18, 16, 14, 13, 12];
 /**
  * Angles for n neighbours, clockwise from the upper left. Four neighbours
  * land on the diagonals, as in the mockup; three make a triangle with one
- * below; six fill left and right too.
+ * below; six sit one above, one below and two on each side.
  */
 export function angles(n: number): number[] {
   if (n === 1) return [Math.PI / 2];
-  const start = -Math.PI / 2 - Math.PI / n;
+  // Six start straight up (one above, one below, two each side): narrower
+  // than a ring with bubbles at the far left and right, so it fits a phone
+  // better once spread() has made room for full patterns.
+  const start = n === 6 ? -Math.PI / 2 : -Math.PI / 2 - Math.PI / n;
   return Array.from({ length: n }, (_, i) => start + (i * 2 * Math.PI) / n);
 }
 
@@ -136,6 +143,32 @@ function onRing(a: number): { x: number; y: number } {
   const c = Math.cos(a), s = Math.sin(a), p = 4;
   const k = 1 / Math.pow(Math.pow(Math.abs(c) / RX, p) + Math.pow(Math.abs(s) / RY, p), 1 / p);
   return { x: c * k, y: s * k };
+}
+
+/**
+ * Pushes neighbours outward along their own direction until no two full
+ * patterns overlap: neither a neighbour's with the centre's, nor two
+ * neighbours' with each other. Angles stay, so the web keeps its shape.
+ */
+export function spread(nodes: PlacedNode[]) {
+  const clear = (r1: number, r2: number) => r1 + r2 + 2 * PATTERN_REACH + PATTERN_GAP;
+  for (let iter = 0; iter < 300; iter++) {
+    let moved = false;
+    for (const n of nodes) {
+      const d = Math.hypot(n.x, n.y), need = clear(R_CENTER, n.r);
+      if (d < need - 0.01) { n.x *= need / d; n.y *= need / d; moved = true; }
+    }
+    for (let i = 0; i < nodes.length; i++) {
+      for (let j = i + 1; j < nodes.length; j++) {
+        const a = nodes[i], b = nodes[j];
+        if (Math.hypot(a.x - b.x, a.y - b.y) < clear(a.r, b.r) - 0.01) {
+          for (const n of [a, b]) { n.x *= 1.01; n.y *= 1.01; }
+          moved = true;
+        }
+      }
+    }
+    if (!moved) break;
+  }
 }
 
 export function layoutWeb(input: LayoutInput): WebLayout {
@@ -170,6 +203,8 @@ export function layoutWeb(input: LayoutInput): WebLayout {
     const p = onRing(dirs[i]);
     return { ...it, x: p.x, y: p.y, r, label: fitLabel(it.title, r, NODE_SIZES) };
   });
+
+  spread(placed);
 
   // Every bubble hangs off the centre; links between bubbles add more strands.
   const pos = new Map(placed.map(p => [p.id, p]));

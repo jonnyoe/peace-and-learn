@@ -1,7 +1,8 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Grade, Rating } from 'ts-fsrs';
-import { getConceptCards, getStudyCards, saveReview, WebKey, WebStudyCard } from '../db';
-import { bubbleStats, orderForStudy } from '../knowledge';
+import { bubbleLace, getStudyCards, saveReview, WebKey, WebStudyCard } from '../db';
+import { orderForStudy } from '../knowledge';
+import { LACE_GROW_MS } from '../web/motifs';
 import { rate as schedule } from '../scheduler';
 
 // One study session for a web (spec section 4b): the cards of this web and
@@ -21,11 +22,10 @@ type Session = {
   reviewed: number;
   grew: { id: string; title: string }[]; // bubbles whose lace gained a layer
   requeued: string[];                    // card ids already sent round again (once each)
+  pausing: boolean;                      // a lace layer is fading in; the next card waits
 };
 
-const OFF: Session = { phase: 'off', queue: [], index: 0, revealed: false, reviewed: 0, grew: [], requeued: [] };
-
-const laceOf = (conceptId: string, now: Date) => bubbleStats(getConceptCards(conceptId), now).lace;
+const OFF: Session = { phase: 'off', queue: [], index: 0, revealed: false, reviewed: 0, grew: [], requeued: [], pausing: false };
 
 export function useStudySession(webKey: WebKey) {
   const [s, setState] = useState<Session>(OFF);
@@ -35,8 +35,22 @@ export function useStudySession(webKey: WebKey) {
   const ref = useRef<Session>(OFF);
   const set = (next: Session) => { ref.current = next; setState(next); };
 
+  // When a rating grows a bubble's lace, the rated card stays up (buttons
+  // inert) while the new layer fades in; then the next card shows.
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pending = useRef<Session | null>(null);
+  const cancelPause = () => {
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = null;
+    const next = pending.current;
+    pending.current = null;
+    return next;
+  };
+  useEffect(() => () => { cancelPause(); }, []);
+
   /** Always a brand-new session: fresh queue, first card, answer hidden. */
   function start() {
+    cancelPause();
     const queue = orderForStudy(getStudyCards(webKey), new Date(), SESSION_SIZE);
     set({ ...OFF, phase: queue.length ? 'card' : 'summary', queue });
   }
@@ -47,13 +61,13 @@ export function useStudySession(webKey: WebKey) {
 
   function rate(grade: Grade) {
     const s = ref.current;
-    const card = s.phase === 'card' && s.revealed ? s.queue[s.index] : undefined;
+    const card = s.phase === 'card' && s.revealed && !s.pausing ? s.queue[s.index] : undefined;
     if (!card) return;
     const now = new Date();
-    const before = laceOf(card.concept_id, now);
+    const before = bubbleLace(card.concept_id, now);
     const next = schedule(card, grade);
     saveReview(card.id, next, grade);
-    const after = laceOf(card.concept_id, now);
+    const after = bubbleLace(card.concept_id, now);
 
     const grew = after > before && !s.grew.some(g => g.id === card.concept_id)
       ? [...s.grew, { id: card.concept_id, title: card.concept_title }] : s.grew;
@@ -61,20 +75,33 @@ export function useStudySession(webKey: WebKey) {
     const sendBack = again && !s.requeued.includes(card.id);
     const queue = sendBack ? [...s.queue, { ...card, fsrs: next }] : s.queue;
     const index = s.index + 1;
-    set({
-      ...s, queue, index, grew, revealed: false, reviewed: s.reviewed + 1,
+    const nextSession: Session = {
+      ...s, queue, index, grew, revealed: false, reviewed: s.reviewed + 1, pausing: false,
       requeued: sendBack ? [...s.requeued, card.id] : s.requeued,
       phase: index < queue.length ? 'card' : 'summary',
-    });
+    };
+    if (after <= before) {
+      set(nextSession);
+      return;
+    }
+    // Re-render now (so the web starts the fade), move on once it's done.
+    set({ ...s, grew, reviewed: nextSession.reviewed, pausing: true });
+    pending.current = nextSession;
+    timer.current = setTimeout(() => {
+      const next = cancelPause();
+      if (next) set(next);
+    }, LACE_GROW_MS);
   }
 
   /** End session: shows the summary (the caller skips it if nothing was rated). */
   function end() {
-    if (ref.current.phase === 'card') set({ ...ref.current, phase: 'summary', revealed: false });
+    const s = cancelPause() ?? ref.current;
+    if (s.phase === 'card' || s.phase === 'summary') set({ ...s, phase: 'summary', revealed: false, pausing: false });
   }
 
   /** Clears everything: queue, position, revealed answer, what grew. */
   function close() {
+    cancelPause();
     set(OFF);
   }
 
@@ -87,6 +114,7 @@ export function useStudySession(webKey: WebKey) {
     reviewed: s.reviewed,
     grew: s.grew,
     empty: s.phase === 'summary' && s.queue.length === 0,
+    pausing: s.pausing,
     start, reveal, rate, end, close,
   };
 }

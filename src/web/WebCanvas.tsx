@@ -2,7 +2,9 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { View, Pressable, StyleSheet, LayoutChangeEvent, Animated, Easing, AccessibilityInfo } from 'react-native';
 import Svg, { Circle, G, Line, Path, Text as SvgText } from 'react-native-svg';
 import { layoutWeb, PlacedNode } from './layout';
-import { DASH, LaceLayer, motifFor, motifLayers, MotifPattern } from './motifs';
+import {
+  DASH, freshDashed, freshRange, LACE_GROW_MS, LaceLayer, motifFor, motifLayers, MotifPattern, PALE,
+} from './motifs';
 import { color, font } from '../theme';
 
 // Draws one web: centre bubble, neighbours and straight strands (spec
@@ -19,13 +21,14 @@ export type CanvasNode = { id: string; title: string };
 export type Look = {
   lace: number;                    // 0 to 5
   faded: boolean;
+  recall?: number | null;          // bubble's recall now; sets how fresh its lace ink is
   satellites: (number | null)[];   // recall of each bubble in its nested web
   pattern?: MotifPattern | null;   // lace motif; missing: one picked from the id
 };
 
 const INK_W = 1.1;     // lace line width (spec section 6)
 const BEADS_FROM = 3;  // both ends need this lace level for strand beads
-const GROW_MS = 1200;  // fade-in of a new lace layer (spec 4b: about 1 to 1.5 s)
+const PALE_DASH = '2.5 2.5'; // a fully pale lace layer is dashed
 
 const AnimatedG = Animated.createAnimatedComponent(G);
 
@@ -158,57 +161,95 @@ function Strand({ a, b, faded, beads }: { a: PlacedNode; b: PlacedNode; faded: b
 }
 
 // The bubble's lace: the first "level" layers of its motif, centred on the
-// bubble. Layers it already had are drawn plainly. When the level goes up
-// (a rating in study mode), the new layers fade in over GROW_MS; the
-// pattern is never drawn at the new level before the fade starts, so it
-// doesn't flash. A first draw (opening a web) shows everything at once.
-function Lace({ id, x, y, r, level, faded, pattern, still }: {
-  id: string; x: number; y: number; r: number; level: number; faded: boolean;
+// bubble. level is the earned level, so layers never go away once drawn.
+//
+// Growing: when the level goes up (a rating in study mode), the new layers
+// fade in over LACE_GROW_MS; they are never drawn at full ink before the
+// fade starts, so nothing flashes. A first draw shows everything at once.
+//
+// Fresh ink: each layer's ink follows the bubble's recall right now
+// (motifs.ts, freshInk): outer layers pale first as recall drops from 0.9
+// to 0.85, and are dashed once fully pale. When a review raises recall the
+// ink darkens back over LACE_GROW_MS. Recall is read on every draw, so the
+// ink keeps up as days pass.
+function Lace({ id, x, y, r, level, recall, pattern, still }: {
+  id: string; x: number; y: number; r: number; level: number; recall: number | null;
   pattern?: MotifPattern | null; still: boolean;
 }) {
   const layers = motifLayers(motifFor(pattern, id), r, pattern?.params);
-  const ink = faded ? color.fadedLine : color.ink;
-  // Layers below "settled" are drawn plainly; the rest up to level fade in.
+
+  // ---- Growing ----
   const [settled, setSettled] = useState(level);
-  const opacity = useRef(new Animated.Value(0)).current;
+  const grow = useRef(new Animated.Value(0)).current;
   const latest = useRef(level);
   latest.current = level;
-
   useEffect(() => {
     if (level <= settled || still) {
       if (level !== settled) setSettled(level);
       return;
     }
     // A second rise during a fade carries on from the current opacity.
-    Animated.timing(opacity, {
-      toValue: 1, duration: GROW_MS, easing: Easing.out(Easing.quad), useNativeDriver: false,
+    Animated.timing(grow, {
+      toValue: 1, duration: LACE_GROW_MS, easing: Easing.out(Easing.quad), useNativeDriver: false,
     }).start(({ finished }) => { if (finished) setSettled(latest.current); });
-  }, [level, settled, still, opacity]);
+  }, [level, settled, still, grow]);
+  // Ready for the next rise once the faded-in layers have joined the plain ones.
+  useEffect(() => { grow.setValue(0); }, [settled, grow]);
 
-  // Ready for the next rise, once the fading layers have moved to the plain group.
-  useEffect(() => { opacity.setValue(0); }, [settled, opacity]);
-  useEffect(() => () => opacity.stopAnimation(), [opacity]);
+  // ---- Fresh ink ----
+  // Rounded, so the tiny drift of recall between draws doesn't restart the animation.
+  const target = recall === null ? null : Math.round(recall * 1000) / 1000;
+  const ink = useRef(new Animated.Value(target ?? 1)).current;
+  const first = useRef(true);
+  useEffect(() => {
+    const to = target ?? 1;
+    if (first.current || still) {
+      first.current = false;
+      ink.stopAnimation();
+      ink.setValue(to);
+      return;
+    }
+    Animated.timing(ink, {
+      toValue: to, duration: LACE_GROW_MS, easing: Easing.inOut(Easing.quad), useNativeDriver: false,
+    }).start();
+  }, [target, still, ink]);
+  const inkOf = useMemo(() => Array.from({ length: level }, (_, i) => {
+    const range = freshRange(i, level);
+    return range ? ink.interpolate({ inputRange: range, outputRange: [PALE, 1], extrapolate: 'clamp' }) : 1;
+  }), [level, ink]);
+
+  useEffect(() => () => { grow.stopAnimation(); ink.stopAnimation(); }, [grow, ink]);
 
   const plain = Math.min(settled, level);
+  const layer = (i: number) => (
+    <LaceLayerPaths key={i} layer={layers[i]} opacity={inkOf[i]} dashed={freshDashed(i, level, target)} />
+  );
   return (
     <G transform={'translate(' + x + ' ' + y + ')'}>
-      {layers.slice(0, plain).map((l, i) => <LaceLayerPaths key={i} layer={l} ink={ink} />)}
+      {Array.from({ length: plain }, (_, i) => layer(i))}
       {level > plain && (
-        <AnimatedG opacity={opacity}>
-          {layers.slice(plain, level).map((l, i) => <LaceLayerPaths key={plain + i} layer={l} ink={ink} />)}
+        <AnimatedG opacity={grow}>
+          {Array.from({ length: level - plain }, (_, k) => layer(plain + k))}
         </AnimatedG>
       )}
     </G>
   );
 }
 
-function LaceLayerPaths({ layer, ink }: { layer: LaceLayer; ink: string }) {
+function LaceLayerPaths({ layer, opacity, dashed }: {
+  layer: LaceLayer; opacity: Animated.AnimatedInterpolation<number> | number; dashed: boolean;
+}) {
   return (
-    <>
-      {!!layer.line && <Path d={layer.line} fill="none" stroke={ink} strokeWidth={INK_W} strokeLinejoin="round" strokeLinecap="round" />}
-      {!!layer.dashed && <Path d={layer.dashed} fill="none" stroke={ink} strokeWidth={INK_W} strokeDasharray={DASH} />}
-      {!!layer.fill && <Path d={layer.fill} fill={ink} />}
-    </>
+    <AnimatedG opacity={opacity}>
+      {!!layer.line && (
+        <Path
+          d={layer.line} fill="none" stroke={color.ink} strokeWidth={INK_W}
+          strokeLinejoin="round" strokeLinecap="round" strokeDasharray={dashed ? PALE_DASH : undefined}
+        />
+      )}
+      {!!layer.dashed && <Path d={layer.dashed} fill="none" stroke={color.ink} strokeWidth={INK_W} strokeDasharray={DASH} />}
+      {!!layer.fill && <Path d={layer.fill} fill={color.ink} />}
+    </AnimatedG>
   );
 }
 
@@ -262,7 +303,7 @@ function Bubble({ node, center, hint, look, still }: { node: PlacedNode; center?
   const firstBaseline = y - blockH / 2 + label.lineHeight * 0.78;
   return (
     <G>
-      <Lace id={node.id} x={x} y={y} r={r} level={look?.lace ?? 0} faded={faded} pattern={look?.pattern} still={still} />
+      <Lace id={node.id} x={x} y={y} r={r} level={look?.lace ?? 0} recall={look?.recall ?? null} pattern={look?.pattern} still={still} />
       {!center && <Satellites node={node} recalls={look?.satellites ?? []} />}
       <Circle
         cx={x} cy={y} r={r}

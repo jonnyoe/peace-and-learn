@@ -21,6 +21,43 @@ export type LaceLayer = { line: string; dashed: string; fill: string };
 
 export const LACE_MAX = 42;   // furthest any layer reaches beyond the bubble edge
 export const DASH = '4 3';    // dash pattern for the "dashed" path
+export const LACE_GROW_MS = 1200; // a new layer fades in (and ink darkens back) over this long
+
+// ---------- Fresh ink ----------
+// Layers stay once earned, but their ink follows the bubble's recall right
+// now: at 0.9 and up every layer is full ink; from 0.9 down to 0.85 the
+// outer layers pale one by one, outermost first; below 0.85 all but the
+// innermost are pale and dashed. Pale is ink at PALE opacity, which reads as
+// the faded grey on paper and never disappears.
+export const FRESH_FULL = 0.9;
+export const FRESH_FADED = 0.85;
+export const PALE = 0.3;
+
+/**
+ * Recall range [lo, hi] over which layer i (0 = innermost) of n drawn layers
+ * goes from full ink (at hi) to pale (at lo). null: the innermost layer,
+ * which never pales.
+ */
+export function freshRange(i: number, n: number): [number, number] | null {
+  if (i <= 0 || i >= n) return null;
+  const w = (FRESH_FULL - FRESH_FADED) / (n - 1);
+  const fromOutside = n - 1 - i;          // 0 for the outermost layer
+  const hi = FRESH_FULL - fromOutside * w;
+  return [hi - w, hi];
+}
+
+/** Ink opacity of layer i of n at this recall (null recall: never reviewed, full ink). */
+export function freshInk(i: number, n: number, recall: number | null): number {
+  const range = freshRange(i, n);
+  if (!range || recall === null) return 1;
+  const [lo, hi] = range;
+  const t = Math.min(1, Math.max(0, (recall - lo) / (hi - lo)));
+  return PALE + (1 - PALE) * t;
+}
+
+/** A layer is drawn dashed once it has paled all the way. */
+export const freshDashed = (i: number, n: number, recall: number | null) =>
+  recall !== null && !!freshRange(i, n) && recall <= freshRange(i, n)![0] + 1e-6;
 
 // ---------- Geometry helpers (all return path data) ----------
 const TAU = Math.PI * 2;
