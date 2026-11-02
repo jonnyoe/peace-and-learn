@@ -44,6 +44,9 @@ export type WebLayout = {
 // ---------- Labels ----------
 const VOWELS = /[aeiouy]/i;
 const SUFFIXES = /^(ing|tion|sion|ment|ness|able|ible|ful|less)$/i;
+// Consonant pairs a syllable can start with. A break before any other pair
+// ("Photosy-nthesis") reads badly, so it is avoided when there's a choice.
+const ONSETS = /^(bl|br|ch|cl|cr|dr|fl|fr|gl|gr|ph|pl|pr|sc|sh|sk|sl|sm|sn|sp|st|sw|th|tr|tw|wh|wr)/i;
 
 // Splits a word that is too long, preferring a vowel-then-consonant spot
 // near the middle: "Visuospatial" -> "Visuo-", "spatial".
@@ -64,7 +67,10 @@ function hyphenate(word: string, max: number): string[] {
     const ending = SUFFIXES.test(word.slice(i));
     const ok = (letter && (VOWELS.test(word[i - 1]) || double)) || ending;
     if (!ok || i + 1 > max) continue; // first part plus "-" must fit
-    const score = Math.abs(i - word.length / 2) - (double ? 1.5 : 0) - (ending ? 2.5 : 0);
+    const next = word.slice(i, i + 2);
+    const awkward = next.length === 2 && !VOWELS.test(next[0]) && !VOWELS.test(next[1]) && /[a-z]{2}/i.test(next) &&
+      !double && !ONSETS.test(next);
+    const score = Math.abs(i - word.length / 2) - (double ? 1.5 : 0) - (ending ? 2.5 : 0) + (awkward ? 3 : 0);
     if (score < bestScore) { best = i; bestScore = score; }
   }
   if (best < 0) best = Math.min(max - 1, word.length - 2);

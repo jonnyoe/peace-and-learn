@@ -3,7 +3,7 @@ import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { getWeb, initDb, WebKey } from './src/db';
-import HomeScreen from './src/screens/HomeScreen';
+import HomeScreen from './src/home/HomeScreen';
 import WebScreen from './src/screens/WebScreen';
 import ReviewScreen from './src/screens/ReviewScreen';
 import ImportScreen from './src/screens/ImportScreen';

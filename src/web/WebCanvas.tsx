@@ -34,7 +34,7 @@ const MIN_LABEL_PT = 12;     // bubble labels never drawn smaller than this on s
 const AnimatedG = Animated.createAnimatedComponent(G);
 
 // Reduce Motion on: new layers appear at once instead of fading in.
-function useReduceMotion(): boolean {
+export function useReduceMotion(): boolean {
   const [on, setOn] = useState(false);
   useEffect(() => {
     let live = true;
@@ -322,7 +322,8 @@ const sameLook = (a?: Look, b?: Look) => a === b || (!!a && !!b &&
   a.lace === b.lace && a.faded === b.faded && r4(a.recall) === r4(b.recall) &&
   JSON.stringify(a.pattern ?? null) === JSON.stringify(b.pattern ?? null) &&
   a.satellites.length === b.satellites.length && a.satellites.every((v, i) => r4(v) === r4(b.satellites[i])));
-const Bubble = React.memo(BubbleView, (a: BubbleProps, b: BubbleProps) =>
+// Exported for the Subjects screen, which draws each subject as one bubble.
+export const Bubble = React.memo(BubbleView, (a: BubbleProps, b: BubbleProps) =>
   a.node === b.node && a.center === b.center && a.still === b.still && sameLook(a.look, b.look));
 
 function BubbleView({ node, center, look, still }: BubbleProps) {

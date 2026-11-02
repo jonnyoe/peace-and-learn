@@ -642,21 +642,82 @@ export function removeSample(): number {
 
 
 // ---------- Home ----------
-export type HomeGroup = { category: string | null; webs: { key: WebKey; title: string; bubbles: number }[] };
+// One subject on the Subjects screen. Its bubble shows the centre bubble's
+// motif and lace level; the ink and "faded" follow the whole subject (all
+// its reviewed cards), so a faded bubble means the subject needs review.
+export type HomeSubject = {
+  key: WebKey;
+  title: string;
+  category: string | null;
+  concepts: number;          // bubbles in the subject, all levels
+  cards: number;
+  motifId: string;           // picks a motif when pattern is missing
+  pattern: Pattern | null;
+  lace: number;              // 0 to 5
+  recall: number | null;     // whole subject; null if nothing reviewed yet
+  faded: boolean;
+};
 
-/** Subjects grouped by category, A to Z; subjects without one come last. */
-export function getHome(): HomeGroup[] {
+/** Every subject with what its bubble on the Subjects screen needs. */
+export function getHomeSubjects(now = new Date()): HomeSubject[] {
   const counts: Record<string, number> = {};
   db.getAllSync<{ domain: string; n: number }>('SELECT domain, COUNT(*) AS n FROM concepts GROUP BY domain')
     .forEach(r => (counts[r.domain] = r.n));
-  const groups = new Map<string | null, HomeGroup>();
-  for (const w of listWebs()) {
-    const cat = w.category?.trim() || null;
-    if (!groups.has(cat)) groups.set(cat, { category: cat, webs: [] });
-    groups.get(cat)!.webs.push({ key: { domain: w.name, parentId: null }, title: w.title, bubbles: counts[w.name] ?? 0 });
-  }
-  const list = [...groups.values()];
-  list.forEach(g => g.webs.sort((a, b) => a.title.localeCompare(b.title)));
-  return list.sort((a, b) =>
-    a.category === null ? 1 : b.category === null ? -1 : a.category.localeCompare(b.category));
+  const cards: Record<string, { concept_id: string; fsrs: FsrsCard }[]> = {};
+  db.getAllSync<{ domain: string; concept_id: string; fsrs: string }>(
+    'SELECT c.domain, k.concept_id, k.fsrs FROM cards k JOIN concepts c ON c.id = k.concept_id')
+    .forEach(r => (cards[r.domain] ??= []).push({ concept_id: r.concept_id, fsrs: fromJson(r.fsrs) }));
+
+  return listWebs().map(w => {
+    const mine = cards[w.name] ?? [];
+    const subject = bubbleStats(mine.map(c => c.fsrs), now);
+    const center = w.center_id ? getNodeRow(w.center_id) : null;
+    // Older subjects have no centre bubble: their overall strength sets the lace.
+    const lace = center
+      ? Math.max(bubbleStats(mine.filter(c => c.concept_id === center.id).map(c => c.fsrs), now).lace,
+        lacePeaks([center.id])[center.id] ?? 0)
+      : subject.lace;
+    return {
+      key: { domain: w.name, parentId: null },
+      title: w.title,
+      category: w.category?.trim() || null,
+      concepts: counts[w.name] ?? 0,
+      cards: mine.length,
+      motifId: center?.id ?? 'subject:' + w.name,
+      pattern: center ? parsePattern(center.pattern) : null,
+      lace,
+      recall: subject.recall,
+      faded: subject.faded,
+    };
+  });
+}
+
+/** Category names in use, A to Z. */
+export function getCategories(): string[] {
+  return db.getAllSync<{ category: string }>(
+    "SELECT DISTINCT TRIM(category) AS category FROM domains WHERE TRIM(COALESCE(category, '')) <> '' ORDER BY 1")
+    .map(r => r.category);
+}
+
+/** Sets a subject's category; empty or null puts it in "Other". */
+export function setSubjectCategory(domain: string, category: string | null) {
+  const c = category?.trim() || null;
+  db.runSync('UPDATE domains SET category = ? WHERE name = ?', c, domain);
+}
+
+/**
+ * Like resetAllProgress, for one subject only: its cards become new and due
+ * now, their review history goes, and its bubbles lose their earned lace.
+ * Returns the card count.
+ */
+export function resetSubjectProgress(domain: string, now = new Date()): number {
+  const empty = toJson(createEmptyCard(now));
+  const inDomain = 'SELECT k.id FROM cards k JOIN concepts c ON c.id = k.concept_id WHERE c.domain = ?';
+  let n = 0;
+  db.withTransactionSync(() => {
+    db.runSync('DELETE FROM reviews WHERE card_id IN (' + inDomain + ')', domain);
+    n = db.runSync('UPDATE cards SET fsrs = ?, due = ? WHERE id IN (' + inDomain + ')', empty, now.getTime(), domain).changes;
+    db.runSync('UPDATE concepts SET lace_peak = 0 WHERE domain = ?', domain);
+  });
+  return n;
 }
