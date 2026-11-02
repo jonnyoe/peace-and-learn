@@ -45,7 +45,7 @@ function useReduceMotion(): boolean {
   return on;
 }
 
-export default function WebCanvas({ centerTitle, nodes, edges, onPressCenter, onPressNode, ringId, looks }: {
+export default function WebCanvas({ centerTitle, nodes, edges, onPressCenter, onPressNode, ringId, looks, minLabelPt = MIN_LABEL_PT }: {
   centerTitle: string;
   nodes: CanvasNode[];
   edges: { from_id: string; to_id: string }[];
@@ -55,6 +55,9 @@ export default function WebCanvas({ centerTitle, nodes, edges, onPressCenter, on
   // centre). A bubble folded into "+N more" rings that bubble instead.
   ringId?: string | null;
   looks?: Record<string, Look>; // by node id; 'center' for the centre
+  // Smallest label size on screen. The small study-mode web passes 0, so
+  // labels shrink to fit their bubbles instead of overflowing.
+  minLabelPt?: number;
 }) {
   const [area, setArea] = useState({ w: 0, h: 0 });
   const still = useReduceMotion();
@@ -70,7 +73,7 @@ export default function WebCanvas({ centerTitle, nodes, edges, onPressCenter, on
   const input = useMemo(() => ({ centerTitle, nodes, edges }), [shape]);
   const geo = useMemo(() => layoutWeb(input, 0, aspect), [input, aspect]);
   const fit = area.w && area.h ? Math.min(area.w / geo.box.w, area.h / geo.box.h) : 0;
-  const minFont = fit ? Math.round((MIN_LABEL_PT / fit) * 10) / 10 : 0;
+  const minFont = fit && minLabelPt ? Math.round((minLabelPt / fit) * 10) / 10 : 0;
   const web = useMemo(
     () => (minFont ? layoutWeb(input, minFont, aspect) : geo),
     [geo, minFont, input, aspect]);

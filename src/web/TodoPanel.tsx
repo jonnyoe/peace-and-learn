@@ -10,6 +10,9 @@ import { Pill } from '../ui';
 // bubble it is linked to. Lists the web's own to-dos plus any linked to a
 // bubble shown in it (see getTodos in src/db.ts). Long-press an item to
 // delete it.
+//
+// Collapsed by default to just its header line, so the web gets the height;
+// tapping the header opens the list (and the web shrinks to fit).
 
 export type LinkChoice = { id: string; title: string };
 
@@ -23,6 +26,7 @@ export default function TodoPanel({ webKey, webTitle, bubbles, defaultLinkId, bo
   const [, setVersion] = useState(0);
   const refresh = () => setVersion(v => v + 1);
   const [adding, setAdding] = useState(false);
+  const [expanded, setExpanded] = useState(false);
 
   const todos = getTodos(webKey);
   const open = todos.filter(t => !t.done).length;
@@ -42,10 +46,23 @@ export default function TodoPanel({ webKey, webTitle, bubbles, defaultLinkId, bo
   return (
     <View style={[st.panel, { paddingBottom: 6 + bottomInset }]}>
       <View style={st.head}>
-        <Text style={st.heading} numberOfLines={1} accessibilityRole="header">
-          {'TO-DOS \u00b7 ' + webTitle.toUpperCase()}
-        </Text>
-        {!adding && <Pill label="+ Add" onPress={() => setAdding(true)} accessibilityLabel="Add a to-do" />}
+        <Pressable
+          onPress={() => { setExpanded(e => !e); setAdding(false); }}
+          accessibilityRole="button"
+          accessibilityState={{ expanded }}
+          accessibilityLabel={'To-dos, ' + webTitle + ', ' + open + ' open'}
+          accessibilityHint={expanded ? 'Hides the list' : 'Shows the list'}
+          style={st.toggle}
+        >
+          <Text style={st.heading} numberOfLines={1}>
+            {'TO-DOS \u00b7 ' + webTitle.toUpperCase()}
+          </Text>
+          {open > 0 && <View style={st.count}><Text style={st.countText}>{open}</Text></View>}
+          <Svg width={12} height={12} viewBox="0 0 12 12" style={st.chevron}>
+            <Path d={expanded ? 'M2 4 L6 8 L10 4' : 'M2 8 L6 4 L10 8'} stroke={color.faint} strokeWidth={1.6} fill="none" strokeLinecap="round" strokeLinejoin="round" />
+          </Svg>
+        </Pressable>
+        {!adding && <Pill label="+ Add" onPress={() => { setExpanded(true); setAdding(true); }} accessibilityLabel="Add a to-do" />}
       </View>
 
       {adding && (
@@ -61,7 +78,7 @@ export default function TodoPanel({ webKey, webTitle, bubbles, defaultLinkId, bo
         />
       )}
 
-      {!adding && (todos.length ? (
+      {expanded && !adding && (todos.length ? (
         <ScrollView style={st.list} accessibilityLabel={open + ' open to-dos'}>
           {todos.map(t => (
             <Item key={t.id} todo={t} onToggle={() => toggle(t)} onLongPress={() => confirmDelete(t)} />
@@ -151,11 +168,18 @@ const st = StyleSheet.create({
     borderTopWidth: 1.5,
     borderColor: color.ink,
     paddingHorizontal: size.pad,
-    paddingTop: 14,
+    paddingTop: 4,
     paddingBottom: 6,
   },
-  head: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 4 },
-  heading: { flex: 1, fontFamily: font.uiMedium, fontSize: 13, letterSpacing: 1.4, color: color.faint },
+  head: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+  toggle: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 44 },
+  heading: { flexShrink: 1, fontFamily: font.uiMedium, fontSize: 13, letterSpacing: 1.4, color: color.faint },
+  count: {
+    minWidth: 20, height: 20, borderRadius: 10, paddingHorizontal: 5, backgroundColor: color.ink,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  countText: { fontFamily: font.uiSemi, fontSize: 12, color: color.panel },
+  chevron: { marginLeft: 2 },
   list: { maxHeight: 232 },
   item: {
     flexDirection: 'row', alignItems: 'center', gap: 14, minHeight: 64, paddingVertical: 10,

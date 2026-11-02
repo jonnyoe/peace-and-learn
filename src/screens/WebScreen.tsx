@@ -15,7 +15,9 @@ import { color, font, size } from '../theme';
 // and its to-do panel. Tapping the centre starts study mode (4b): the panel
 // goes away, the web shrinks to the top and a flashcard appears below it.
 
-const STUDY_SCALE = 0.6;
+const STUDY_SCALE = 0.6;   // the web shrinks to this, or less on a tall web area...
+const STUDY_MAX_H = 300;   // ...so its box in study mode is at most this tall
+const SWAP_MS = 250;       // cross-fade to the web laid out for the study box
 const END_GUARD_MS = 500; // taps on the web this soon after starting don't end the session
 
 type Props = {
@@ -61,6 +63,11 @@ function WebScreenFor({ webKey, onOpen, onHome }: Props) {
   // it isn't laid out again on every frame.
   const [full, setFull] = useState<{ w: number; h: number } | null>(null);
   const [shrunk, setShrunk] = useState(false);
+  // Study view of the web. 'scaled': the full web drawn small (while it
+  // shrinks or grows back). 'cross' then 'direct': the web laid out again
+  // for the wide study box, so it fills it, cross-faded in once shrunk.
+  const [studyView, setStudyView] = useState<'scaled' | 'cross' | 'direct'>('scaled');
+  const swap = useRef(new Animated.Value(0)).current;
   const t = useRef(new Animated.Value(0)).current;
   const animGen = useRef(0);
   const startedAt = useRef(0);
@@ -112,11 +119,20 @@ function WebScreenFor({ webKey, onOpen, onHome }: Props) {
     if (!full || session.phase !== 'off') return;
     session.start();
     setShrunk(true);
-    animate(1);
+    setStudyView('scaled');
+    animate(1, () => {
+      swap.setValue(0);
+      setStudyView('cross');
+      Animated.timing(swap, { toValue: 1, duration: SWAP_MS, useNativeDriver: false }).start(({ finished }) => {
+        if (finished && mounted.current) setStudyView(v => (v === 'cross' ? 'direct' : v));
+      });
+    });
   }
 
   function backToWeb() {
     session.close();
+    swap.stopAnimation();
+    setStudyView('scaled'); // grow back from the full web drawn small
     animate(0, () => setShrunk(false));
   }
 
@@ -146,18 +162,32 @@ function WebScreenFor({ webKey, onOpen, onHome }: Props) {
   const ringId = anchor && anchor === web.center?.id ? 'center' : anchor;
 
   const animated = shrunk && full;
+  const sc = full ? Math.min(STUDY_SCALE, STUDY_MAX_H / full.h) : STUDY_SCALE;
   const outerStyle = animated
-    ? [st.canvasBox, studying && st.canvasStudy, { height: t.interpolate({ inputRange: [0, 1], outputRange: [full.h, full.h * STUDY_SCALE] }) }]
+    ? [st.canvasBox, studying && st.canvasStudy, { height: t.interpolate({ inputRange: [0, 1], outputRange: [full.h, full.h * sc] }) }]
     : [st.canvasBox, st.grow];
   const innerStyle = animated
     ? {
       position: 'absolute' as const, left: 0, top: 0, width: full.w, height: full.h,
       transform: [
-        { translateY: t.interpolate({ inputRange: [0, 1], outputRange: [0, -full.h * (1 - STUDY_SCALE) / 2] }) },
-        { scale: t.interpolate({ inputRange: [0, 1], outputRange: [1, STUDY_SCALE] }) },
+        { translateY: t.interpolate({ inputRange: [0, 1], outputRange: [0, -full.h * (1 - sc) / 2] }) },
+        { scale: t.interpolate({ inputRange: [0, 1], outputRange: [1, sc] }) },
       ],
     }
     : st.grow;
+
+  const canvas = (minLabelPt?: number) => (
+    <WebCanvas
+      minLabelPt={minLabelPt}
+      centerTitle={web.center?.title ?? web.title}
+      nodes={web.nodes}
+      edges={web.edges}
+      onPressCenter={studying ? undefined : startStudy}
+      onPressNode={pressNode}
+      ringId={ringId}
+      looks={looks}
+    />
+  );
 
   return (
     <KeyboardAvoidingView style={st.wrap} behavior={Platform.OS === 'ios' ? 'padding' : undefined} {...swipe.panHandlers}>
@@ -183,17 +213,16 @@ function WebScreenFor({ webKey, onOpen, onHome }: Props) {
       )}
 
       <Animated.View style={outerStyle} onLayout={measure}>
-        <Animated.View style={innerStyle}>
-          <WebCanvas
-            centerTitle={web.center?.title ?? web.title}
-            nodes={web.nodes}
-            edges={web.edges}
-            onPressCenter={studying ? undefined : startStudy}
-            onPressNode={pressNode}
-            ringId={ringId}
-            looks={looks}
-          />
-        </Animated.View>
+        {studyView !== 'direct' && (
+          <Animated.View style={[innerStyle, studyView === 'cross' && { opacity: swap.interpolate({ inputRange: [0, 1], outputRange: [1, 0] }) }]}>
+            {canvas()}
+          </Animated.View>
+        )}
+        {studyView !== 'scaled' && (
+          <Animated.View style={[StyleSheet.absoluteFill, { opacity: swap }]}>
+            {canvas(0)}
+          </Animated.View>
+        )}
         {/* Study mode: the whole shrunken web is one button that ends the
             session. It sits over the web only, not the card below. */}
         {session.phase === 'card' && (

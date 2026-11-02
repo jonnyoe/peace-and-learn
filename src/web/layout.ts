@@ -5,13 +5,15 @@
 export const R_NODE = 38;
 export const R_CENTER = 46;
 export const MAX_SHOWN = 8;  // more than this and the rest fold into "+N more"
-// How far a full pattern (lace or satellites) actually reaches beyond a
-// bubble's edge, and the clear space kept between two patterns.
+// How far a full pattern (lace or satellites) reaches beyond a bubble's
+// edge: the widest motif (hub) reaches 39.3 plus half its 1.1 line, so 40
+// covers every motif. Two full patterns are kept PATTERN_GAP apart, so
+// they barely don't touch.
 export const PATTERN_REACH = 40;
-export const PATTERN_GAP = 4;
-// The drawing box keeps this much room around every bubble, so a full
-// pattern is never cut off at the edge of the web area.
-const EDGE_ROOM = PATTERN_REACH + 1;
+export const PATTERN_GAP = 1;
+// The drawing box ends right at the outermost pattern edge: patterns may
+// run up to the sides of the web area without being cut off.
+const EDGE_ROOM = PATTERN_REACH;
 
 export type LayoutInput = {
   centerTitle: string;
@@ -176,29 +178,36 @@ export function angles(n: number): number[] {
   return Array.from({ length: n }, (_, i) => start + (i * 2 * Math.PI) / n);
 }
 
+// Clear distances between bubble centres: full patterns PATTERN_GAP apart.
+const centreGap = (r: number) => R_CENTER + r + 2 * PATTERN_REACH + PATTERN_GAP;
+const neighbourGap = (r: number) => 2 * r + 2 * PATTERN_REACH + PATTERN_GAP;
+
 /**
- * Shortest centre-to-neighbour distance at which every full pattern stays
- * PATTERN_GAP clear: of the centre's pattern, and of the patterns of the
- * neighbours on either side (n evenly spaced neighbours of radius r).
+ * Neighbours in directions dirs, on an ellipse k times as tall as it is
+ * wide, pulled in as close as the clear distances allow: to the centre and
+ * between every pair of neighbours.
  */
-export function neighbourDistance(n: number, r: number): number {
-  const fromCenter = R_CENTER + r + 2 * PATTERN_REACH + PATTERN_GAP;
-  if (n < 2) return fromCenter;
-  const fromEachOther = (2 * r + 2 * PATTERN_REACH + PATTERN_GAP) / (2 * Math.sin(Math.PI / n));
-  return Math.max(fromCenter, fromEachOther);
+function placeTight(dirs: number[], k: number, r: number): { x: number; y: number }[] {
+  const base = dirs.map(a => ({ x: Math.cos(a), y: Math.sin(a) * k }));
+  let t = 0;
+  for (const p of base) t = Math.max(t, centreGap(r) / (Math.hypot(p.x, p.y) || 1e-9));
+  for (let i = 0; i < base.length; i++) {
+    for (let j = i + 1; j < base.length; j++) {
+      const d = Math.hypot(base[i].x - base[j].x, base[i].y - base[j].y) || 1e-9;
+      t = Math.max(t, neighbourGap(r) / d);
+    }
+  }
+  return base.map(p => ({ x: p.x * t, y: p.y * t }));
 }
 
 /** Font sizes with nothing below min (natural units). */
 const atLeast = (sizes: number[], min: number) => [...new Set(sizes.map(s => Math.max(s, Math.round(min * 10) / 10)))];
 
 /**
- * Lays out one web, packed tight: neighbours sit at neighbourDistance, so
- * the visible strand between two patterns is only about PATTERN_GAP long.
- * WebCanvas then scales the whole drawing up to fill its area.
- *
- * aspect (area height / width) picks between the two symmetric turns of
- * the ring (e.g. four on the diagonals or on the axes), whichever fills the
- * area better. minFont keeps labels from shrinking below that size in
+ * Lays out one web, packed tight: neighbours sit as close as their full
+ * patterns allow (PATTERN_GAP apart), on a ring stretched to the shape of
+ * the area (aspect = area height / width). WebCanvas then scales the whole
+ * drawing up to fill its area. minFont keeps labels from shrinking below that size in
  * natural units (WebCanvas passes 12 pt divided by its scale).
  */
 export function layoutWeb(input: LayoutInput, minFont = 0, aspect = 1.1): WebLayout {
@@ -225,27 +234,38 @@ export function layoutWeb(input: LayoutInput, minFont = 0, aspect = 1.1): WebLay
     ...(hidden.length ? [{ id: 'more', title: '+' + hidden.length + ' more', hiddenIds: hidden.map(h => h.id) }] : []),
   ];
   const n = items.length;
-  const d = neighbourDistance(n, r);
 
-  // Bounding box (pattern room included) for one turn of the ring.
-  const boxFor = (dirs: number[]) => {
-    const pts = [{ x: 0, y: 0, r: R_CENTER }, ...dirs.map(a => ({ x: Math.cos(a) * d, y: Math.sin(a) * d, r }))];
-    const minX = Math.min(...pts.map(p => p.x - p.r - EDGE_ROOM));
-    const maxX = Math.max(...pts.map(p => p.x + p.r + EDGE_ROOM));
-    const minY = Math.min(...pts.map(p => p.y - p.r - EDGE_ROOM));
-    const maxY = Math.max(...pts.map(p => p.y + p.r + EDGE_ROOM));
+  // Bounding box (pattern room included) of a placement.
+  const boxFor = (pts: { x: number; y: number }[]) => {
+    const all = [{ x: 0, y: 0, r: R_CENTER }, ...pts.map(p => ({ ...p, r }))];
+    const minX = Math.min(...all.map(p => p.x - p.r - EDGE_ROOM));
+    const maxX = Math.max(...all.map(p => p.x + p.r + EDGE_ROOM));
+    const minY = Math.min(...all.map(p => p.y - p.r - EDGE_ROOM));
+    const maxY = Math.max(...all.map(p => p.y + p.r + EDGE_ROOM));
     return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
   };
-  const fill = (b: { w: number; h: number }) => Math.min(1 / b.w, aspect / b.h); // relative scale in the area
-  let dirs = angles(n);
+  // How big the web is drawn in an area of this aspect (relative units).
+  const fill = (b: { w: number; h: number }) => Math.min(1 / b.w, aspect / b.h);
+
+  // Try both turns of the ring and stretch it taller or wider, so the web
+  // matches the shape of its area (tall on the web screen, wide in study
+  // mode); keep whichever draws the bubbles biggest. A plain circle wins ties.
+  let pts = placeTight(angles(n), 1, r);
+  let best = fill(boxFor(pts));
   if (n >= 2) {
-    const turned = dirs.map(a => a + Math.PI / n);
-    if (fill(boxFor(turned)) > fill(boxFor(dirs)) * 1.001) dirs = turned;
+    for (const turn of [0, Math.PI / n]) {
+      const dirs = angles(n).map(a => a + turn);
+      for (let k = 0.4; k <= 3.001; k += 0.02) {
+        const cand = placeTight(dirs, k, r);
+        const f = fill(boxFor(cand));
+        if (f > best * 1.002) { best = f; pts = cand; }
+      }
+    }
   }
 
   const sizes = atLeast(NODE_SIZES, minFont);
   const placed: PlacedNode[] = items.map((it, i) => ({
-    ...it, x: Math.cos(dirs[i]) * d, y: Math.sin(dirs[i]) * d, r, label: fitLabel(it.title, r, sizes),
+    ...it, x: pts[i].x, y: pts[i].y, r, label: fitLabel(it.title, r, sizes),
   }));
 
   // Every bubble hangs off the centre; links between bubbles add more strands.
@@ -261,5 +281,5 @@ export function layoutWeb(input: LayoutInput, minFont = 0, aspect = 1.1): WebLay
     strands.push({ from: a.id, to: b.id, x1: a.x, y1: a.y, x2: b.x, y2: b.y });
   }
 
-  return { center, nodes: placed, strands, box: boxFor(dirs) };
+  return { center, nodes: placed, strands, box: boxFor(pts) };
 }
