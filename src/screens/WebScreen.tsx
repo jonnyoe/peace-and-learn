@@ -1,11 +1,12 @@
 import React from 'react';
-import { View, Text, Pressable, StyleSheet } from 'react-native';
+import { View, Text, Pressable, StyleSheet, KeyboardAvoidingView, Platform } from 'react-native';
 import { getWeb, WebKey } from '../db';
 import WebCanvas from '../web/WebCanvas';
+import TodoPanel from '../web/TodoPanel';
 import { color, font, size } from '../theme';
 
-// The home of each subject (spec section 4a): breadcrumb, title, the web.
-// The to-do panel (step 4) and study mode (step 5) come later.
+// The home of each subject (spec section 4a): breadcrumb, title, the web
+// and its to-do panel. Study mode (step 5) comes later.
 export default function WebScreen({ webKey, onOpen, onHome }: {
   webKey: WebKey;
   onOpen: (key: WebKey) => void;
@@ -29,8 +30,14 @@ export default function WebScreen({ webKey, onOpen, onHome }: {
     if (n && n.childCount > 0) onOpen({ domain: web!.key.domain, parentId: n.id });
   }
 
+  // A new to-do can link to the centre or any bubble around it; the centre
+  // is preselected.
+  const linkChoices = [web.center, ...web.nodes]
+    .filter((n): n is NonNullable<typeof n> => !!n)
+    .map(n => ({ id: n.id, title: n.title }));
+
   return (
-    <View style={st.wrap}>
+    <KeyboardAvoidingView style={st.wrap} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <View style={st.header}>
         <View style={st.crumbs}>
           <Crumb label={web.category ?? 'Subjects'} onPress={onHome} first />
@@ -56,7 +63,14 @@ export default function WebScreen({ webKey, onOpen, onHome }: {
       {!web.nodes.length && (
         <Text style={st.empty}>No bubbles here yet. Material you add to this subject shows up around the centre.</Text>
       )}
-    </View>
+      <TodoPanel
+        key={web.key.domain + '/' + (web.key.parentId ?? '')}
+        webKey={web.key}
+        webTitle={web.title}
+        bubbles={linkChoices}
+        defaultLinkId={web.center?.id ?? null}
+      />
+    </KeyboardAvoidingView>
   );
 }
 
