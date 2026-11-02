@@ -7,7 +7,6 @@ import WebCanvas from '../web/WebCanvas';
 import TodoPanel from '../web/TodoPanel';
 import { useStudySession } from '../study/useStudySession';
 import { SessionSummary, StudyCardView } from '../study/StudyCard';
-import { Pill } from '../ui';
 import { color, font, size } from '../theme';
 
 // The home of each subject (spec section 4a): breadcrumb, title, the web
@@ -16,17 +15,29 @@ import { color, font, size } from '../theme';
 
 const STUDY_SCALE = 0.6;
 
-type Props = { webKey: WebKey; onOpen: (key: WebKey) => void; onHome: () => void };
+type Props = {
+  webKey: WebKey;
+  onOpen: (key: WebKey) => void;
+  onHome: () => void;
+  // Told when a study session starts and ends (also false when the screen
+  // goes away), so the app can hide its tab bar during study.
+  onStudyingChange?: (studying: boolean) => void;
+};
 
 // A fresh screen (and study session) for every web.
 export default function WebScreen(props: Props) {
   return <WebScreenFor key={props.webKey.domain + '/' + (props.webKey.parentId ?? '')} {...props} />;
 }
 
-function WebScreenFor({ webKey, onOpen, onHome }: Props) {
+function WebScreenFor({ webKey, onOpen, onHome, onStudyingChange }: Props) {
   const web = getWeb(webKey);
   const session = useStudySession(webKey);
   const studying = session.phase !== 'off';
+
+  const notify = useRef(onStudyingChange);
+  notify.current = onStudyingChange;
+  useEffect(() => { notify.current?.(studying); }, [studying]);
+  useEffect(() => () => notify.current?.(false), []);
 
   // Size of the full web, measured before study starts. While studying (and
   // while growing back) the web is drawn at that size and scaled down, so
@@ -113,7 +124,7 @@ function WebScreenFor({ webKey, onOpen, onHome }: Props) {
 
   const animated = shrunk && full;
   const outerStyle = animated
-    ? [st.canvasBox, { height: t.interpolate({ inputRange: [0, 1], outputRange: [full.h, full.h * STUDY_SCALE] }) }]
+    ? [st.canvasBox, studying && st.canvasStudy, { height: t.interpolate({ inputRange: [0, 1], outputRange: [full.h, full.h * STUDY_SCALE] }) }]
     : [st.canvasBox, st.grow];
   const innerStyle = animated
     ? {
@@ -130,11 +141,19 @@ function WebScreenFor({ webKey, onOpen, onHome }: Props) {
       {studying ? (
         // Compact header while studying: one short line, so the shrunken web
         // and the card get the room. End session is the way out.
-        <View style={[st.header, st.headerStudy]}>
-          <View style={st.titleRow}>
-            <Text style={[st.titleStudy, st.titleText]} numberOfLines={1}>{web.title}</Text>
-            {session.phase === 'card' && <Pill label="End session" onPress={endSession} />}
-          </View>
+        <View style={st.bar}>
+          <Text style={[st.barTitle, st.titleText]} numberOfLines={1}>{web.title}</Text>
+          {session.phase === 'card' && (
+            <Pressable
+              onPress={endSession}
+              accessibilityRole="button"
+              accessibilityLabel="End session"
+              hitSlop={{ top: 8, bottom: 8, left: 16, right: 12 }}
+              style={st.barEnd}
+            >
+              {({ pressed }) => <Text style={[st.barEndText, pressed && st.barEndPressed]}>End</Text>}
+            </Pressable>
+          )}
         </View>
       ) : (
       <View style={st.header}>
@@ -215,12 +234,17 @@ const st = StyleSheet.create({
   crumb: { minHeight: 44, justifyContent: 'center' },
   crumbText: { fontFamily: font.ui, fontSize: size.small, color: color.faint },
   sep: { fontFamily: font.ui, fontSize: size.small, color: color.faint, marginHorizontal: 6 },
-  headerStudy: { paddingTop: 4 },
-  titleRow: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 44 },
-  titleStudy: { fontFamily: font.readingBold, fontSize: 22, lineHeight: 28, color: color.ink },
+  // Study mode: a thin bar instead of a heading. "End" is plain text; its
+  // hitSlop keeps the touch area at 44 pt.
+  bar: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: size.pad, paddingTop: 2, minHeight: 30 },
+  barTitle: { fontFamily: font.readingSemi, fontSize: 16, lineHeight: 22, color: color.ink },
+  barEnd: { minHeight: 28, justifyContent: 'center' },
+  barEndText: { fontFamily: font.uiMedium, fontSize: 16, color: color.ink, textDecorationLine: 'underline' },
+  barEndPressed: { color: color.faint },
   titleText: { flex: 1 },
   title: { fontFamily: font.readingBold, fontSize: 32, lineHeight: 40, color: color.ink },
   canvasBox: { marginTop: 4, marginBottom: 8 },
+  canvasStudy: { marginTop: 0, marginBottom: 4 },
   grow: { flex: 1 },
   empty: { fontFamily: font.ui, fontSize: size.small, color: color.faint, textAlign: 'center', paddingHorizontal: size.pad, paddingBottom: 16 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12, padding: size.pad },

@@ -32,6 +32,8 @@ export default function App() {
   const fontsReady = useThemeFonts();
   const [tab, setTab] = useState<Tab>('web');
   const [place, setPlaceState] = useState<WebKey | null>(loadPlace);
+  // The tab bar hides during a study session to give the card the room.
+  const [studying, setStudying] = useState(false);
 
   function setPlace(p: WebKey | null) {
     setSetting('web_place', JSON.stringify(p));
@@ -47,14 +49,14 @@ export default function App() {
         {/* Screens remount on tab change, so Review always reflects new cards. */}
         <View style={st.body}>
           {tab === 'web' && (place
-            ? <WebScreen webKey={place} onOpen={setPlace} onHome={() => setPlace(null)} />
+            ? <WebScreen webKey={place} onOpen={setPlace} onHome={() => setPlace(null)} onStudyingChange={setStudying} />
             : <HomeScreen onOpen={setPlace} />)}
           {tab === 'review' && <ReviewScreen onGoImport={() => setTab('add')} />}
           {tab === 'add' && <ImportScreen onSaved={() => setTab('map')} />}
           {tab === 'map' && <MapScreen />}
           {tab === 'model' && <ModelScreen />}
         </View>
-        <View style={st.tabs}>
+        {!(studying && tab === 'web') && <View style={st.tabs}>
           {TABS.map(t => {
             const active = tab === t.key;
             return (
@@ -63,7 +65,7 @@ export default function App() {
               </Pressable>
             );
           })}
-        </View>
+        </View>}
       </SafeAreaView>
     </SafeAreaProvider>
   );
