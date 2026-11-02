@@ -29,6 +29,7 @@ export type Look = {
 const INK_W = 1.1;     // lace line width (spec section 6)
 const BEADS_FROM = 3;  // both ends need this lace level for strand beads
 const PALE_DASH = '2.5 2.5'; // a fully pale lace layer is dashed
+const MIN_LABEL_PT = 12;     // bubble labels never drawn smaller than this on screen
 
 const AnimatedG = Animated.createAnimatedComponent(G);
 
@@ -58,7 +59,16 @@ export default function WebCanvas({ centerTitle, nodes, edges, onPressCenter, on
 }) {
   const [area, setArea] = useState({ w: 0, h: 0 });
   const still = useReduceMotion();
-  const web = useMemo(() => layoutWeb({ centerTitle, nodes, edges }), [centerTitle, nodes, edges]);
+  // Pass 1 places the bubbles; the scale that fills the area follows from
+  // it. Pass 2 refits the labels so none is drawn under MIN_LABEL_PT on
+  // screen (placement doesn't depend on labels, so the box is the same).
+  const aspect = area.w && area.h ? Math.round((area.h / area.w) * 20) / 20 : 1.1;
+  const geo = useMemo(() => layoutWeb({ centerTitle, nodes, edges }, 0, aspect), [centerTitle, nodes, edges, aspect]);
+  const fit = area.w && area.h ? Math.min(area.w / geo.box.w, area.h / geo.box.h) : 0;
+  const minFont = fit ? Math.round((MIN_LABEL_PT / fit) * 10) / 10 : 0;
+  const web = useMemo(
+    () => (minFont ? layoutWeb({ centerTitle, nodes, edges }, minFont, aspect) : geo),
+    [geo, minFont, centerTitle, nodes, edges, aspect]);
 
   const onLayout = (e: LayoutChangeEvent) => {
     const { width, height } = e.nativeEvent.layout;
@@ -169,7 +179,8 @@ function Strand({ a, b, faded, beads }: { a: PlacedNode; b: PlacedNode; faded: b
 //
 // Fresh ink: each layer's ink follows the bubble's recall right now
 // (motifs.ts, freshInk): outer layers pale first as recall drops from 0.9
-// to 0.85, and are dashed once fully pale. When a review raises recall the
+// to 0.85, and are dashed once fully pale; below 0.85 (a faded bubble) the
+// innermost layer is pale too, but stays solid. When a review raises recall the
 // ink darkens back over LACE_GROW_MS. Recall is read on every draw, so the
 // ink keeps up as days pass.
 function Lace({ id, x, y, r, level, recall, pattern, still }: {
@@ -197,8 +208,9 @@ function Lace({ id, x, y, r, level, recall, pattern, still }: {
   useEffect(() => { grow.setValue(0); }, [settled, grow]);
 
   // ---- Fresh ink ----
-  // Rounded, so the tiny drift of recall between draws doesn't restart the animation.
-  const target = recall === null ? null : Math.round(recall * 1000) / 1000;
+  // Rounded down, so the tiny drift of recall between draws doesn't restart
+  // the animation, and a bubble just under 0.85 (faded) never rounds up to it.
+  const target = recall === null ? null : Math.floor(recall * 10000) / 10000;
   const ink = useRef(new Animated.Value(target ?? 1)).current;
   const first = useRef(true);
   useEffect(() => {
@@ -296,8 +308,8 @@ function Bubble({ node, center, hint, look, still }: { node: PlacedNode; center?
   // A faded centre turns grey instead of dashed, so its white text stays readable.
   const fill = center ? (faded ? color.fadedBorder : color.ink) : color.panel;
   const fg = center ? color.panel : faded ? color.faint : color.ink;
-  const hintSize = 8.5;
-  const hintGap = hint && center ? hintSize + 5 : 0;
+  const hintSize = label.hintSize ?? 8.5;
+  const hintGap = hint && center ? 13.5 : 0; // HINT_ROOM in layout.ts
   // Vertically centre the text block (title lines plus the hint line).
   const blockH = label.lines.length * label.lineHeight + hintGap;
   const firstBaseline = y - blockH / 2 + label.lineHeight * 0.78;
@@ -331,7 +343,7 @@ function Bubble({ node, center, hint, look, still }: { node: PlacedNode; center?
           y={firstBaseline + (label.lines.length - 1) * label.lineHeight + hintGap + 2}
           fontSize={hintSize}
           fontFamily={font.uiMedium}
-          letterSpacing={1.2}
+          letterSpacing={label.hintSpacing ?? 1.2}
           fill={fg}
           textAnchor="middle"
         >
